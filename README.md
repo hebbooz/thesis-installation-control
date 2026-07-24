@@ -82,6 +82,17 @@ The fake rig is retained permanently as a regression harness — switch back to 
 
 Hardware ordered. Development proceeds in phases (see `docs/BUILD_ORDER.md`); phases 1–3 require no hardware.
 
+## Related repositories
+
+This repository contains the **control system** only. Other components live separately, coupled to this one solely through the OSC contract in `docs/PROTOCOL.md`:
+
+| Repository | Contents |
+|---|---|
+| `https://github.com/hebbooz/thesis-ar-app` | Unity AR application (micro-scale). A passive subscriber — receives state/intensity, sends only `/client/hello`. Mirrors `docs/PROTOCOL.md`. |
+| *(this repo)* | Orchestration server, temperature ingestion, actuation, input, ESPHome sensor config |
+
+`docs/PROTOCOL.md` in this repository is the **source of truth** for the contract. If it changes, update the mirrored copy in the AR repo.
+
 ## Licence
 
 Academic project. All third-party firmware (Tasmota, ESPHome, WLED) under its own licence.
