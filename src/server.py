@@ -11,6 +11,7 @@ Run it:  python src/server.py
 from __future__ import annotations
 
 import logging
+import os
 import time
 from logging.handlers import RotatingFileHandler
 from pathlib import Path
@@ -66,7 +67,9 @@ def setup_logging(cfg_log: dict) -> tuple[logging.Logger, logging.Logger]:
 
 
 def main() -> None:
-    cfg = load_config()
+    # CORAL_CONFIG selects an alternate config file (the test suite uses this to run
+    # an isolated instance; also handy for a second server). Defaults to config.yaml.
+    cfg = load_config(os.environ.get("CORAL_CONFIG"))
     log, sample_log = setup_logging(cfg["logging"])
     log.info("=== coral orchestration server starting ===")
 

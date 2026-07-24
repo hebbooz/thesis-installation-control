@@ -68,6 +68,25 @@ Drive a full visitor arc from the keyboard: press `w`, watch the temperature cli
 
 The fake rig is retained permanently as a regression harness — switch back to `mode: simulated` at any time to test logic changes without hardware.
 
+## Tests
+
+Automated regression suite, no hardware required:
+
+```bash
+pip install -r requirements-dev.txt
+pytest
+```
+
+- `tests/test_state.py` drives the state machine through every Phase 1 acceptance
+  scenario (warm/reverse, latch, recovery, idle reset) against the committed
+  `config.example.yaml`.
+- `tests/test_broadcast.py` covers the client registry and the OSC bundle wire format.
+- `tests/test_e2e.py` launches the real server on an isolated port and checks the
+  OSC contract, registration, pruning, and startup-order independence over UDP.
+
+This suite is the permanent guard on the state logic — run it after any change to
+`src/`.
+
 ## Documentation
 
 | Document | Contents |
