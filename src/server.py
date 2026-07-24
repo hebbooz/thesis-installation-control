@@ -1,0 +1,137 @@
+"""Orchestration server — the one bespoke component (CLAUDE.md).
+
+A single-threaded, fixed-tick event loop. Every tick it: services the inbound OSC
+plane (registrations + harness buttons), reads the temperature through the
+ingestion seam, derives (state, intensity), and — every 4th tick, to hit the 5 Hz
+broadcast rate — fans the result out and prunes the client registry. Everything is
+read from config; nothing here hard-codes a threshold, address, or port.
+
+Run it:  python src/server.py
+"""
+from __future__ import annotations
+
+import logging
+import time
+from logging.handlers import RotatingFileHandler
+from pathlib import Path
+
+from broadcast import Broadcaster
+from config import REPO_ROOT, load_config
+from state import CoralState
+from temperature import make_source
+
+# Internal loop runs SUBTICKS× faster than the broadcast rate (5 Hz -> 20 Hz) so
+# button input and temperature are serviced promptly between broadcasts. This is a
+# structural loop constant, not a tunable — the broadcast rate itself lives in config.
+SUBTICKS = 4
+
+
+def setup_logging(cfg_log: dict) -> tuple[logging.Logger, logging.Logger]:
+    """Configure rotating file + console logging.
+
+    Returns (log, sample_log). ``log`` carries transitions, inputs and lifecycle to
+    both console and file. ``sample_log`` carries the high-rate temperature samples
+    to the file only, keeping the console readable while preserving thesis data.
+    """
+    log_dir = Path(cfg_log.get("dir", "logs"))
+    if not log_dir.is_absolute():
+        log_dir = REPO_ROOT / log_dir
+    log_dir.mkdir(parents=True, exist_ok=True)
+
+    level = getattr(logging, str(cfg_log.get("level", "INFO")).upper(), logging.INFO)
+    fmt = logging.Formatter("%(asctime)s %(levelname)s %(message)s", "%Y-%m-%d %H:%M:%S")
+    file_handler = RotatingFileHandler(
+        log_dir / "coral.log",
+        maxBytes=int(cfg_log.get("rotate_mb", 10)) * 1_000_000,
+        backupCount=int(cfg_log.get("backups", 5)),
+    )
+    file_handler.setFormatter(fmt)
+    console = logging.StreamHandler()
+    console.setFormatter(fmt)
+
+    log = logging.getLogger("coral")
+    log.setLevel(level)
+    log.handlers.clear()
+    log.addHandler(file_handler)
+    log.addHandler(console)
+    log.propagate = False
+
+    sample_log = logging.getLogger("coral.samples")
+    sample_log.setLevel(level)
+    sample_log.handlers.clear()
+    sample_log.addHandler(file_handler)  # file only — not the console
+    sample_log.propagate = False
+
+    return log, sample_log
+
+
+def main() -> None:
+    cfg = load_config()
+    log, sample_log = setup_logging(cfg["logging"])
+    log.info("=== coral orchestration server starting ===")
+
+    state = CoralState(cfg["state"], cfg["targets"])
+    # The seam is fed the *current* target lazily, so the simulation always drifts
+    # toward whatever the buttons last set without state.py knowing about it.
+    source = make_source(cfg["temperature"], get_target=lambda: state.target)
+    bc = Broadcaster(cfg["broadcast"])
+
+    broadcast_hz = float(cfg["broadcast"]["rate_hz"])
+    dt = 1.0 / (broadcast_hz * SUBTICKS)
+    log_samples = bool(cfg["logging"].get("log_temperature_samples", False))
+
+    static_names = [s.get("name", "?") for s in cfg["broadcast"].get("static_subscribers", [])]
+    log.info(
+        "mode=%s broadcast=%.0fHz internal=%.0fHz listen=%s:%d static=%s",
+        cfg["temperature"]["mode"], broadcast_hz, broadcast_hz * SUBTICKS,
+        bc.bind_host, bc.listen_port, static_names,
+    )
+
+    tick = 0
+    next_t = time.monotonic()
+    try:
+        while True:
+            now = time.monotonic()
+
+            # 1. Inbound plane: registrations + harness button events.
+            extras, newly = bc.poll_inbound(now)
+            for cid in newly:
+                log.info("CLIENT registered: %s (%d total)", cid, len(bc.registry))
+            warm = any(addr == "/sim/warm" for addr, _ in extras)
+            cool = any(addr == "/sim/cool" for addr, _ in extras)
+            state.apply_input(warm, cool)
+
+            # 2. Temperature (ingestion seam) and 3. state derivation.
+            temp = source.read(dt)
+            state.update(temp, dt)
+            for event in state.drain_events():
+                log.info(event)
+
+            # 4. Broadcast + prune at the configured rate (every SUBTICKS ticks).
+            if tick % SUBTICKS == 0:
+                for cid in bc.registry.prune(now):
+                    log.info("CLIENT pruned (silent >%.0fs): %s", bc.registry.timeout_s, cid)
+                bc.emit(state.state, state.intensity, temp)
+                if log_samples:
+                    sample_log.info(
+                        "SAMPLE temp=%.3f target=%.1f state=%d intensity=%.3f",
+                        temp, state.target, state.state, state.intensity,
+                    )
+            tick += 1
+
+            # 5. Fixed-tick pacing against a monotonic clock; resync if we fall behind.
+            next_t += dt
+            sleep = next_t - time.monotonic()
+            if sleep > 0:
+                time.sleep(sleep)
+            else:
+                next_t = time.monotonic()
+    except KeyboardInterrupt:
+        log.info("interrupt received — shutting down")
+    finally:
+        bc.close()
+        log.info("=== server stopped ===")
+
+
+if __name__ == "__main__":
+    main()
