@@ -1,0 +1,108 @@
+# Coral Installation — configuration template
+# Copy to config.yaml (gitignored) and edit for your environment.
+# EVERY threshold, timing, address and port lives here. Never hard-code these in source.
+
+# ─────────────────────────────────────────────────────────────
+# Temperature source: "simulated" (no hardware) or "real"
+# This is the single abstraction seam. Nothing else changes between modes.
+# ─────────────────────────────────────────────────────────────
+temperature:
+  mode: simulated
+
+  # Simulated thermal model (used when mode: simulated)
+  simulated:
+    start_temp: 26.0
+    heat_rate: 0.025        # °C per second when heater on  (~80 s for 26→28)
+    cool_rate: 0.012        # °C per second when heater off (~2.8 min for 28→26)
+    noise: 0.02             # small random jitter, makes it feel real
+
+  # Real sensor (used when mode: real)
+  real:
+    ingestion: http         # "http" (poll ESPHome) or "mqtt"
+    sensor_url: "http://192.168.8.30/sensor/water_temperature"
+    poll_hz: 2
+    timeout_s: 2.0
+    mqtt:                   # only used when ingestion: mqtt
+      broker: "192.168.8.10"
+      port: 1883
+      topic: "coral/sensor/water_temperature/state"
+
+# ─────────────────────────────────────────────────────────────
+# State machine — the thermal narrative.
+# These values are deliberate and thematic. Tune, don't remove.
+# ─────────────────────────────────────────────────────────────
+state:
+  temp_natural: 26.0        # intensity 0.0 anchor
+  temp_bleached: 28.0       # intensity 1.0 anchor
+  rise_threshold: 26.2      # above this, state 1 (Fluorescent) engages
+  latch_threshold: 27.8     # at/above this...
+  latch_hold_s: 10          # ...sustained this long, bleaching LATCHES (irreversible)
+  recovery_lag_s: 30        # after cooling begins, stays bleached this long
+  recovery_ramp_s: 45       # then heals gradually over this long
+  idle_timeout_s: 180       # no input this long → auto-reset to Natural
+
+# ─────────────────────────────────────────────────────────────
+# Targets set by the buttons
+# ─────────────────────────────────────────────────────────────
+targets:
+  warm: 28.0
+  cool: 26.0
+
+# ─────────────────────────────────────────────────────────────
+# Broadcast — the event plane
+# ─────────────────────────────────────────────────────────────
+broadcast:
+  rate_hz: 5                # raise to 10 if any subscriber shows visible stepping
+  bind_host: "0.0.0.0"      # NEVER 127.0.0.1
+  listen_port: 9000         # inbound: /client/hello
+
+  # Static subscribers — always sent to, never expire
+  static_subscribers:
+    - { name: "ableton",    host: "127.0.0.1", port: 9010 }
+    - { name: "projection", host: "127.0.0.1", port: 9020 }
+
+  # Dynamic subscribers (AR phones) register via /client/hello
+  client_port: 9001         # port AR devices listen on
+  client_timeout_s: 15      # prune registry entries idle longer than this
+
+# ─────────────────────────────────────────────────────────────
+# Actuation — Tasmota smart plugs (local HTTP, no cloud)
+# ─────────────────────────────────────────────────────────────
+plugs:
+  enabled: false            # set true when mode: real
+  timeout_s: 2.0
+  heater: "http://192.168.8.21"
+  fan:    "http://192.168.8.22"
+  lamp:   "http://192.168.8.23"
+
+  # Lamp behaviour: "on_until_bleach" switches the lamp off at the bleach latch
+  # (a dramatic beat), "always_on" leaves it alone, "off" disables lamp control.
+  lamp_mode: on_until_bleach
+
+# ─────────────────────────────────────────────────────────────
+# Input — USB arcade encoder.
+# NOTE: enumerates as a GAMEPAD, not a keyboard.
+# Run tools/discover_buttons.py to find the indices for your unit.
+# ─────────────────────────────────────────────────────────────
+input:
+  enabled: true
+  device_index: 0
+  warm_button: 0
+  cool_button: 1
+
+# ─────────────────────────────────────────────────────────────
+# Display — read-only web page for a spare phone/tablet
+# ─────────────────────────────────────────────────────────────
+display:
+  enabled: true
+  port: 8080
+
+# ─────────────────────────────────────────────────────────────
+# Logging — debugging evidence, exhibition diagnostics, thesis data
+# ─────────────────────────────────────────────────────────────
+logging:
+  level: INFO
+  dir: "logs"
+  rotate_mb: 10
+  backups: 5
+  log_temperature_samples: true   # verbose but valuable for the thesis

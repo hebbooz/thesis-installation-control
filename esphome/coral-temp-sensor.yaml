@@ -1,0 +1,67 @@
+# Coral installation — water temperature sensor
+# ESP32-C3 Mini + waterproof DS18B20 on GPIO4 (4.7k pull-up to 3V3)
+#
+# First flash over USB:  esphome run esphome/coral-temp-sensor.yaml
+# Subsequent updates are over-the-air.
+# Verify: curl http://<sensor-ip>/sensor/water_temperature
+
+esphome:
+  name: coral-temp-sensor
+  friendly_name: Coral Water Temperature
+
+esp32:
+  board: esp32-c3-devkitm-1
+  framework:
+    type: esp-idf
+
+logger:
+
+# Local web server — the orchestration server polls this.
+# No cloud, no Home Assistant required.
+web_server:
+  port: 80
+  version: 2
+
+wifi:
+  ssid: !secret wifi_ssid          # the 2.4 GHz SSID
+  password: !secret wifi_password
+  # Fallback AP if the network is unavailable
+  ap:
+    ssid: "coral-temp-fallback"
+    password: !secret fallback_password
+
+captive_portal:
+
+# Optional: uncomment to publish over MQTT instead of HTTP polling
+# mqtt:
+#   broker: 192.168.8.10
+#   topic_prefix: coral
+
+dallas:
+  - pin: GPIO4
+    update_interval: 500ms
+
+sensor:
+  - platform: dallas
+    # Run once with this commented out; the log prints the probe's address.
+    # Then set it here so the sensor is identified explicitly.
+    # address: 0x1234567890abcdef
+    index: 0
+    id: water_temperature
+    name: "Water Temperature"
+    unit_of_measurement: "°C"
+    accuracy_decimals: 2
+    filters:
+      # Light smoothing — the state machine wants a stable reading,
+      # not raw sensor jitter.
+      - median:
+          window_size: 5
+          send_every: 2
+
+  - platform: wifi_signal
+    name: "WiFi Signal"
+    update_interval: 60s
+
+binary_sensor:
+  - platform: status
+    name: "Sensor Status"
