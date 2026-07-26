@@ -52,8 +52,9 @@ python src/server.py
 python tools/fake_rig.py
 #   w = warm    c = cool    q = quit
 
-# Terminal 3+ — pretend AR clients (run several)
-python tools/fake_client.py --id phone1
+# Terminal 3+ — pretend AR clients (run several; each needs a distinct id)
+python tools/fake_client.py --id phone1     # phone2, phone3, ... in more terminals
+#   (omit --id and each process auto-picks a unique one)
 
 # Optional — stand in for Ableton/projection to verify the fan-out on their port
 python tools/osc_monitor.py            # binds the 'ableton' static port (9010)
