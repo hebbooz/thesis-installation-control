@@ -1,10 +1,11 @@
 """Orchestration server — the one bespoke component (CLAUDE.md).
 
 A single-threaded, fixed-tick event loop. Every tick it: services the inbound OSC
-plane (registrations + harness buttons), reads the temperature through the
-ingestion seam, derives (state, intensity), and — every 4th tick, to hit the 5 Hz
-broadcast rate — fans the result out and prunes the client registry. Everything is
-read from config; nothing here hard-codes a threshold, address, or port.
+plane (registrations + harness buttons) and the physical arcade buttons, reads the
+temperature through the ingestion seam, derives (state, intensity), and — every 4th
+tick, to hit the 5 Hz broadcast rate — fans the result out and prunes the client
+registry. Everything is read from config; nothing here hard-codes a threshold,
+address, or port.
 
 Run it:  python src/server.py
 """
@@ -19,6 +20,7 @@ from pathlib import Path
 from actuation import PlugController
 from broadcast import Broadcaster
 from config import REPO_ROOT, load_config
+from inputs import ButtonReader
 from state import CoralState
 from temperature import make_source
 
@@ -82,6 +84,9 @@ def main() -> None:
     # Actuation plane: gates the Tasmota plugs off-loop from (target, state). Inert
     # unless plugs.enabled, so it is safe to construct in simulated mode too.
     plugs = PlugController(cfg["plugs"], cfg["targets"]["cool"], log)
+    # Physical arcade buttons (USB HID gamepad). Reports (False, False) when disabled
+    # or no encoder is attached, so the OSC harness path below is always available.
+    buttons = ButtonReader(cfg["input"], log)
 
     broadcast_hz = float(cfg["broadcast"]["rate_hz"])
     dt = 1.0 / (broadcast_hz * SUBTICKS)
@@ -100,12 +105,16 @@ def main() -> None:
         while True:
             now = time.monotonic()
 
-            # 1. Inbound plane: registrations + harness button events.
+            # 1. Inbound plane: registrations + harness button events, plus the
+            # physical encoder. Both funnel into the one set-target path — hardware
+            # and the OSC harness are indistinguishable to the state machine, and a
+            # press from either source counts. Cool-wins is resolved in apply_input.
             extras, newly = bc.poll_inbound(now)
             for cid in newly:
                 log.info("CLIENT registered: %s (%d total)", cid, len(bc.registry))
-            warm = any(addr == "/sim/warm" for addr, _ in extras)
-            cool = any(addr == "/sim/cool" for addr, _ in extras)
+            hw_warm, hw_cool = buttons.read()
+            warm = hw_warm or any(addr == "/sim/warm" for addr, _ in extras)
+            cool = hw_cool or any(addr == "/sim/cool" for addr, _ in extras)
             state.apply_input(warm, cool)
 
             # 2. Temperature (ingestion seam) and 3. state derivation.
@@ -142,6 +151,7 @@ def main() -> None:
     finally:
         source.close()   # stop the sensor poll thread (no-op in simulated mode)
         plugs.close()
+        buttons.close()  # release the gamepad backend (no-op when disabled)
         bc.close()
         log.info("=== server stopped ===")
 

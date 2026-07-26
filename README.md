@@ -118,6 +118,34 @@ heater and arms the bleach latch.) Press `b` to blind the probe mid-arc — the 
 logs `SENSOR read failed … holding last reading` and keeps broadcasting, because the
 poll runs on a background thread and never blocks the loop.
 
+### Verifying the buttons (Phase 6) without hardware
+
+The physical arcade buttons wire to a USB "zero delay" encoder that enumerates as a
+**gamepad, not a keyboard** — `src/inputs.py` reads it with `pygame.joystick`. There
+is no emulator to run: the keyboard harness above (`tools/fake_rig.py`) already
+injects the same warm/cool presses over OSC, so the whole input path is exercised
+with zero hardware and `tests/test_inputs.py` guards the encoder policy against a
+fake joystick. When the real encoder is wired, discover its button indices once:
+
+```bash
+python tools/discover_buttons.py     # press each button; note the index; Ctrl-C to quit
+```
+
+```yaml
+# config.yaml
+input:
+  enabled: true
+  device_index: 0     # the device number the tool prints
+  warm_button: 0      # index printed when you press the WARM (red) button
+  cool_button: 1      # index printed when you press the COOL (blue) button
+```
+
+A press from the encoder and a press from `fake_rig` are indistinguishable to the
+state machine — both set the target through the identical path, cool wins on a
+simultaneous press, and either resets the idle timer. If the encoder is absent or
+unplugged mid-run, the server logs it and keeps broadcasting; the idle reset returns
+the piece to Natural.
+
 ## Running with real hardware
 
 1. Set up the private network (separate 2.4 GHz and 5 GHz SSIDs — see `docs/HARDWARE.md`).
@@ -146,6 +174,9 @@ pytest
 - `tests/test_temperature.py` covers the real-sensor ingestion seam: parsing the
   ESPHome reply, holding the last reading on a timeout/malformed/null response, and
   the poll thread's lifecycle.
+- `tests/test_inputs.py` covers the arcade-button policy against a fake joystick:
+  button-level reporting, configurable indices, cool-wins at the seam, idle-timer
+  reset, and fail-soft/reacquire when the encoder is absent or unplugged mid-run.
 - `tests/test_e2e.py` launches the real server on an isolated port and checks the
   OSC contract, registration, pruning, and startup-order independence over UDP.
 

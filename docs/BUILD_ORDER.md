@@ -110,6 +110,10 @@ Real water drives the full arc at acceptable pacing. Swapping the fake rig for t
 2. `tools/discover_buttons.py` — print gamepad button indices; record in config.
 3. Implement `src/inputs.py` using `pygame.joystick`. **Not a keyboard listener.**
 
+*Implementation notes:* `ButtonReader` reads the encoder with `pygame.joystick` and answers one question per tick — *which buttons are down now?* — returning `(warm, cool)`. Those funnel into the **exact same** set-target path the OSC harness drives (`/sim/warm` · `/sim/cool` → `state.apply_input`), so the state machine is byte-identical whether input comes from the encoder or the keyboard rig; **cool-wins** and the idle-timer reset are resolved downstream in `apply_input`. Unlike the sensor and plugs it runs **in-loop, not on a thread** — a local HID read is non-blocking, so threading it would add complexity for nothing and cost the loop its determinism. It is **fail-soft**: a missing/unplugged/mid-run-removed encoder reports `(False, False)` and never raises (the server keeps broadcasting and the idle reset returns the piece to Natural), and a re-plugged encoder re-acquires automatically. The pygame access sits behind a small backend seam so the policy is unit-testable with no hardware.
+
+**Verify without hardware first:** there is no new emulator to run — the OSC harness (`tools/fake_rig.py`) *is* the no-hardware input path, injecting the same warm/cool presses the encoder will. `tests/test_inputs.py` drives a fake joystick backend to guard the whole policy permanently: button-level reporting, configurable indices, cool-wins at the seam, idle-timer reset, and the fail-soft/reacquire behaviour on unplug. Run `python tools/discover_buttons.py` once the encoder is wired to read off each button's index (it uses the identical `get_button` call the server does, so whatever it sees, the server reads too).
+
 **Acceptance test:**
 Physical buttons drive the real water. Cool wins on simultaneous press. Presses reset the idle timer. Unplug the encoder → server continues, logs it, idle reset eventually fires.
 
