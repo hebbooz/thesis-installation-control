@@ -47,9 +47,14 @@ Mobile AR devices are transient and interchangeable, so they are not given reser
 | `/client/hello` | string | Client identifier, sent every 5 s |
 
 Server behaviour:
-- On receipt: insert or refresh `{id, ip, last_seen}` in the client registry. The IP is taken from the UDP packet source, not the payload.
-- Broadcast is unicast to every registered client.
+- On receipt: insert or refresh `{id, ip, port, last_seen}` in the client registry. **Both the IP and the port are taken from the UDP packet source**, not the payload.
+- Broadcast is unicast to that `(ip, port)` for every registered client.
 - Entries with `last_seen` older than 15 s are pruned.
+
+Client requirement (**MUST**):
+- A client **MUST send `/client/hello` from the same socket it listens for broadcasts on.** The server replies to the packet's source `(ip, port)`, so a client that transmits hello from a different or ephemeral port than it listens on will register successfully but **never receive a broadcast**. In practice: use one bidirectional UDP/OSC socket, bound to the client's listen port (default 9001), for both sending hello and receiving the fan-out. (In Unity/extOSC, set the transmitter's local port to the receiver's port.)
+
+Why `(ip, port)` and not a fixed port: taking the port from the packet lets several clients share one host — e.g. multiple `tools/fake_client.py` instances on one laptop during localhost testing, which could not all bind the same fixed port — and is NAT-friendly. The cost is the MUST above.
 
 This is application-layer service discovery: a phone that joins, sleeps, crashes, or is swapped mid-exhibition is handled with no configuration.
 
@@ -120,6 +125,17 @@ Semantics:
 - Any press resets the idle timer.
 - Button indices are configurable; discover them once and record in config.
 
+### Harness input (no-hardware mode)
+
+While the physical buttons are unbuilt (Phases 1–5), `tools/fake_rig.py` injects presses over OSC to the server's listen port (UDP 9000), so the whole arc is drivable from a keyboard:
+
+| Address | Type | Server action |
+|---|---|---|
+| `/sim/warm` | (no args) | set target = warm — identical to the warm button |
+| `/sim/cool` | (no args) | set target = cool — identical to the cool button |
+
+These are **development-harness messages only**. They funnel into the exact same set-target path the HID buttons use (above), so state logic is byte-identical whether input arrives from the keyboard or the encoder. They are harmless to leave enabled in production on the isolated LAN.
+
 ---
 
 ## 6. Display — server to display device
@@ -141,7 +157,7 @@ Read-only. No control authority.
 |---|---|
 | Server OSC listener (hello) | UDP 9000 |
 | AR devices OSC listener | UDP 9001 (per device) |
-| Ableton Connection Kit | UDP 9010 (localhost) |
+| Ableton M4L OSC receiver | UDP 9010 (localhost) |
 | Projection player | UDP 9020 (localhost) |
 | Display web page | HTTP 8080 |
 | Tasmota plugs | HTTP 80 |

@@ -54,6 +54,9 @@ python tools/fake_rig.py
 
 # Terminal 3+ — pretend AR clients (run several)
 python tools/fake_client.py --id phone1
+
+# Optional — stand in for Ableton/projection to verify the fan-out on their port
+python tools/osc_monitor.py            # binds the 'ableton' static port (9010)
 ```
 
 Drive a full visitor arc from the keyboard: press `w`, watch the temperature climb and `intensity` rise, see state 1 engage, hold at 28 °C until the bleach latch fires, press `c`, sit through the recovery lag, watch it heal back to state 0. Walk away for three minutes and the idle reset returns it to Natural.
@@ -96,6 +99,7 @@ This suite is the permanent guard on the state logic — run it after any change
 | `docs/PROTOCOL.md` | OSC message schema, HTTP contracts, registry protocol |
 | `docs/HARDWARE.md` | Devices, wiring, firmware, network configuration |
 | `docs/BUILD_ORDER.md` | Phased build sequence with acceptance tests |
+| `docs/ABLETON.md` | Phase 2: wiring the Ableton soundscape to the OSC broadcast |
 
 ## Project status
 

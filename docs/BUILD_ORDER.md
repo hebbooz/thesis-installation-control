@@ -31,11 +31,15 @@ Run server + fake rig. Then, from the keyboard:
 ## Phase 2 — Ableton integration
 *No hardware. First end-to-end proof of the whole concept.*
 
+Server side is already satisfied: Ableton is a static subscriber on UDP 9010, so the server emits to it the moment it runs — no code changes. This phase is Ableton GUI work. **Full step-by-step in [ABLETON.md](ABLETON.md).**
+
 **Build:**
-1. Install Ableton's free **Connection Kit**; add the OSC receiver device listening on UDP 9010.
+1. Add a free Max for Live **OSC-receiver device** (e.g. OSC Mapper) listening on UDP 9010. *(The old Connection Kit is discontinued; its OSC Monitor is display-only — see [ABLETON.md](ABLETON.md).)*
 2. Two parallel stem groups (natural / industrial) routed through a crossfader.
 3. Map `/coral/intensity` → crossfader, plus 2–3 macros (filter cutoff, drone level, reverb decay).
 4. Optionally map `/coral/state` → a discrete musical event at the bleach latch.
+
+**Verify the pipe first:** `python tools/osc_monitor.py` binds port 9010 and prints exactly what Ableton would receive, so any fault can be isolated to the server side or the Ableton side. Quit it before pointing Ableton at 9010 (one program per UDP port).
 
 **Acceptance test:**
 Drive the fake rig through a full arc and *hear* the soundscape degrade continuously with warming, land the bleach moment, and calm through the lagged recovery. **Record this** — it is the first demonstrable proof of the concept and useful thesis documentation.

@@ -76,7 +76,7 @@ The **MacBook Pro** is the single host for all bespoke and playback software. It
 
 1. **Orchestration server** — the control brain (Python).
 2. **Projection player** — dual-clip video renderer to the spanned projector canvas.
-3. **Ableton Live** — audio engine with the Connection Kit OSC receiver.
+3. **Ableton Live** — audio engine with a Max for Live OSC-receiver device.
 
 All other computing elements are self-contained appliances on the LAN: the three AR devices (own render), the WLED controller, the smart plug, the WiFi sensor, and the temperature display. The USB button encoder is a local HID device on the host.
 
@@ -93,7 +93,7 @@ Consolidating server, video, and audio on one host is safe because the video is 
                        │        ├── HTTP req/res (L3 actuation plane)                              │
                        │        │                                                                  │
                        │ Projection Player ◀── OSC/UDP (localhost)                                 │
-                       │ Ableton + Connection Kit ◀── OSC/UDP (localhost)                          │
+                       │ Ableton + M4L OSC receiver ◀── OSC/UDP (localhost)                        │
                        │                                                                          │
    HDMI ×2 ◀───────────┤ (spanned 2560×800 canvas) │        audio out ─────────────────────────▶ │
                        └───────────┬──────────────────────────────────┬──────────────────────────┘
@@ -148,7 +148,7 @@ Two transports, each chosen to match its plane:
 |---|---|---|
 | Server OSC listener (hello, sensor-push if used) | UDP 9000 | inbound |
 | AR devices OSC listener | UDP 9001 | inbound (per device) |
-| Ableton Connection Kit listener | UDP 9010 | inbound (localhost) |
+| Ableton M4L OSC-receiver listener | UDP 9010 | inbound (localhost) |
 | Projection player listener | UDP 9020 | inbound (localhost) |
 | WLED (native UDP realtime / JSON API) | UDP 21324 / HTTP 80 | inbound to WLED |
 | Smart plug local API | HTTP 80 | inbound to plug |
@@ -160,7 +160,7 @@ Two transports, each chosen to match its plane:
 ## 5. Messaging architecture (L3) — event plane
 
 ### 5.1 Protocol
-The event plane uses **OSC (Open Sound Control)** over UDP. OSC is chosen because it is the lingua franca of the subscriber tools (Ableton via Connection Kit, Unity via extOSC, WLED-adjacent tooling), is trivially small (an address pattern plus typed arguments), and requires no schema negotiation.
+The event plane uses **OSC (Open Sound Control)** over UDP. OSC is chosen because it is the lingua franca of the subscriber tools (Ableton via a Max for Live OSC device, Unity via extOSC, WLED-adjacent tooling), is trivially small (an address pattern plus typed arguments), and requires no schema negotiation.
 
 ### 5.2 Canonical message set (server → all subscribers)
 Broadcast as an OSC bundle at a fixed rate (§7.1):
@@ -176,9 +176,9 @@ Broadcast as an OSC bundle at a fixed rate (§7.1):
 ### 5.3 Registration protocol (dynamic subscribers → server)
 | Address | Arg type | Semantics |
 |---|---|---|
-| `/client/hello` | string (client id) | Announced by each AR device every 5 s; carries the sender's identity. Source IP is taken from the UDP packet. |
+| `/client/hello` | string (client id) | Announced by each AR device every 5 s; carries the sender's identity. Source `(ip, port)` is taken from the UDP packet. |
 
-The server maintains a **client registry**: on `hello`, insert/refresh `{id, ip, last_seen}`; the fixed-rate broadcast is unicast to every registered client plus the static localhost subscribers; entries idle >15 s are pruned. This is application-layer service discovery and is what makes AR devices plug-and-play without reserved addresses (§4.2).
+The server maintains a **client registry**: on `hello`, insert/refresh `{id, ip, port, last_seen}` using the packet's source `(ip, port)`; the fixed-rate broadcast is unicast to that address for every registered client, plus the static localhost subscribers; entries idle >15 s are pruned. Because the reply target is the packet source, a client **MUST send `hello` from the socket it listens on** (one bidirectional socket bound to its receive port) — this is what lets multiple clients share a host during localhost testing, at the cost of that constraint (see PROTOCOL.md §2). This is application-layer service discovery and is what makes AR devices plug-and-play without reserved addresses (§4.2).
 
 ### 5.4 Why not a broker
 A message broker (e.g. MQTT for the event plane) was considered and rejected under KISS: the fan-out set is tiny and mostly static, subscribers already speak OSC natively, and continuous re-broadcast removes the need for broker-provided retained messages or QoS. MQTT remains acceptable *only* as the sensor's own native output if the chosen sensor speaks MQTT rather than HTTP (§6.2); in that case the server subscribes to one topic. The event plane stays OSC regardless.
@@ -224,7 +224,7 @@ Existing Unity app on up to three ARKit/ARCore devices. Modifications: add **ext
 Pre-rendered Unreal reef exported as looping mp4s (one per state, optionally directional transition clips). A small **projection player** (Unity, reusing the same extOSC listener pattern) renders two VideoPlayers with a cross-fade driven by `/coral/state`/`/coral/intensity`, output fullscreen across a single **spanned 2560×800** canvas so the two Epson EB-435W units are one continuous image and cannot drift. Physical alignment per the existing Projection Prep Guide (position-first, minimal keystone, native 1280×800×60 Hz per unit); the guide's exposure/black-level guidance governs the mp4 export.
 
 ### 6.6 Audio subsystem — config (L5) [Proc H]
-Ableton Live set with two parallel stem groups (natural / industrial) on a crossfader. The free **Connection Kit** OSC device receives `/coral/intensity` (UDP 9010) and maps it to the crossfader plus macros (filter cutoff, drone level, reverb decay); `/coral/state` optionally triggers a discrete musical event at the bleach latch. No custom Max patch required. Audio egresses the host to powered speakers.
+Ableton Live set with two parallel stem groups (natural / industrial) on a crossfader. A free **Max for Live OSC-receiver device** (e.g. OSC Mapper) receives `/coral/intensity` (UDP 9010) and maps it to the crossfader plus macros (filter cutoff, drone level, reverb decay); `/coral/state` optionally triggers a discrete musical event at the bleach latch. No custom Max patch required — off-the-shelf device only. Audio egresses the host to powered speakers. Setup in `docs/ABLETON.md`.
 
 ### 6.7 Light subsystem — COTS + firmware flash (L1) [Proc D]
 An off-the-shelf ESP controller + addressable strip + PSU flashed with **WLED** (no code). The server maps `intensity` → brightness and warm/cool colour temperature via WLED's native realtime UDP or JSON HTTP API. A **separate constant neutral spotlight** on the coral is unmanaged (always on) to hold AR tracking illumination when the room light dims — architecturally it is *not* a subscriber and carries no state.
@@ -273,11 +273,13 @@ Default: server **polls** the sensor over HTTP at 2–5 Hz (simple, firewall-fre
 | 3 | Recovery | from State 2, target cool AND ≥30 s lag elapsed | gradual heal back to State 0 |
 
 ### 8.3 Transition rules
-- **0→1→(reversible):** below the latch threshold, cooling smoothly returns toward 0; State 2 is never entered. Only bleaching is irreversible in the moment.
-- **1→2 latch:** requires the sustained-hold condition (debounce against momentary spikes); once latched, further temperature variation does not change state until recovery.
-- **2→3:** entered only after cool target is set *and* the recovery lag elapses; the coral remains visibly bleached during the lag (the cool button is not an undo).
-- **3→0:** on completion of the heal ramp.
-- **Idle reset:** no input for 3 min → server sets target to 26 °C and drives the system back to State 0.
+*(As implemented in Phase 1 — the details below are behavioural contract for subscribers, not just guidance.)*
+- **0↔1 (reversible, with hysteresis):** State 1 engages when T rises above `rise_threshold` (26.2) and releases back to 0 only once T falls to `temp_natural` (26.0). The gap between the two anchors exceeds sensor noise, preventing state chatter at the boundary. Below the latch threshold, cooling smoothly returns toward 0; State 2 is never entered. Only bleaching is irreversible in the moment.
+- **1→2 latch:** requires T sustained ≥ `latch_threshold` for `latch_hold_s` (debounce against momentary spikes). The hold accumulates **only while warming** (target = warm); cooling resets it — so the system cannot latch on the way down, and a reset never re-latches during cool-off. Once latched, temperature variation does nothing until recovery.
+- **2→3:** entered only after the cool target is set *and* the recovery lag elapses; visibly bleached during the lag (the cool button is not an undo).
+- **3→2 (re-bleach):** setting the warm target *during* recovery cancels the heal and returns to State 2. **Subscribers must handle this backward transition.**
+- **3→0:** on completion of the heal ramp **and** once T has returned below `rise_threshold`. State 3 therefore persists at intensity 0 until the water is actually cool, so the coral never flickers back to Fluorescent on the way out — meaning **State 3 may outlast `recovery_ramp_s`.**
+- **Idle reset:** no input for `idle_timeout_s` (3 min) → server clears any latch and sets target = 26 °C, then converges to State 0 via normal cooling (no teleport — honest for real water; the coral cools through State 1 to Natural).
 - **Conflict resolution:** cool target wins.
 - **Cold start:** all components assume State 0 until the first broadcast/first sensor reading.
 
