@@ -16,6 +16,7 @@ import time
 from logging.handlers import RotatingFileHandler
 from pathlib import Path
 
+from actuation import PlugController
 from broadcast import Broadcaster
 from config import REPO_ROOT, load_config
 from state import CoralState
@@ -76,8 +77,11 @@ def main() -> None:
     state = CoralState(cfg["state"], cfg["targets"])
     # The seam is fed the *current* target lazily, so the simulation always drifts
     # toward whatever the buttons last set without state.py knowing about it.
-    source = make_source(cfg["temperature"], get_target=lambda: state.target)
+    source = make_source(cfg["temperature"], get_target=lambda: state.target, log=log)
     bc = Broadcaster(cfg["broadcast"])
+    # Actuation plane: gates the Tasmota plugs off-loop from (target, state). Inert
+    # unless plugs.enabled, so it is safe to construct in simulated mode too.
+    plugs = PlugController(cfg["plugs"], cfg["targets"]["cool"], log)
 
     broadcast_hz = float(cfg["broadcast"]["rate_hz"])
     dt = 1.0 / (broadcast_hz * SUBTICKS)
@@ -110,6 +114,10 @@ def main() -> None:
             for event in state.drain_events():
                 log.info(event)
 
+            # 3b. Gate the plugs. Edge-driven and enqueue-only, so this is cheap
+            # every tick and reacts to a button-driven target change immediately.
+            plugs.update(state.target, state.state)
+
             # 4. Broadcast + prune at the configured rate (every SUBTICKS ticks).
             if tick % SUBTICKS == 0:
                 for cid in bc.registry.prune(now):
@@ -132,6 +140,8 @@ def main() -> None:
     except KeyboardInterrupt:
         log.info("interrupt received — shutting down")
     finally:
+        source.close()   # stop the sensor poll thread (no-op in simulated mode)
+        plugs.close()
         bc.close()
         log.info("=== server stopped ===")
 

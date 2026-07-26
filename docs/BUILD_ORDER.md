@@ -69,6 +69,10 @@ Drive the fake rig through a full arc and *hear* the soundscape degrade continuo
 3. Implement `src/actuation.py` — Tasmota HTTP on/off with timeouts and soft failure.
 4. Wire the Mac to the router by Ethernet.
 
+*Implementation notes:* `src/actuation.py` is edge-driven (a plug is commanded only when its desired state changes) and runs all HTTP on a single background worker thread, so a plug that blocks until timeout never stalls the 5 Hz loop. The heater/fan follow the **target** (warm → heater on / fan off); the lamp follows the **state** (`lamp_mode: on_until_bleach` blacks it out at the bleach latch). The session ignores any system proxy so plug traffic stays on the isolated LAN.
+
+**Verify without hardware first:** `tools/fake_plug.py` emulates a Tasmota plug. Run three (heater/fan/lamp) on localhost ports, point config at them, set `plugs.enabled: true`, and drive `tools/fake_rig.py` — the whole acceptance test below is reproducible with zero plugs (see the README "Verifying the plugs" section). `tests/test_actuation.py` guards the policy and fail-soft behaviour permanently.
+
 **Acceptance test:**
 With `plugs.enabled: true` and still in simulated temperature mode, the fake rig's target changes physically switch the plugs (a lamp plugged into each makes this visible). Unplug a plug mid-run → server logs the failure and keeps running.
 
@@ -81,7 +85,11 @@ With `plugs.enabled: true` and still in simulated temperature mode, the fake rig
 1. Wire ESP32-C3 + DS18B20 + 4.7 kΩ pull-up on the breadboard (see `docs/HARDWARE.md`).
 2. Flash `esphome/coral-temp-sensor.yaml`; join 2.4 GHz SSID; note IP.
 3. Implement `RealSource` in `src/temperature.py`.
-4. Set `temperature.mode: real`.
+4. Set `temperature.mode: real` and point `temperature.real.sensor_url` at the sensor.
+
+*Implementation notes:* `RealSource` polls the ESPHome web server on a **single background thread** (like `actuation.py`), so a sensor that is unplugged or slow blocks only that thread, never the 5 Hz loop — `read()` returns the last cached reading instantly. On timeout or a malformed/null reply it **holds the last good reading** and logs once (and once on recovery), per PROTOCOL §4. Ingestion is **HTTP only** by design (CLAUDE.md: no MQTT broker). Before the first poll lands it reports `real.start_temp`, so the system boots at state 0.
+
+**Verify without hardware first:** `tools/fake_sensor.py` emulates the ESPHome endpoint, serving a keyboard-driven thermal ramp. Point `sensor_url` at it, set `mode: real`, and drive `w`/`c` in its terminal — the whole arc runs through the real ingestion path with zero hardware (see the README "Verifying the sensor" section). Press `b` to blind the probe and watch the server hold the last reading and keep broadcasting. `tests/test_temperature.py` guards the parse/hold/fail-soft policy permanently. This is the correctness proof of the seam: nothing above `temperature.py` changes between simulated and real.
 
 **Critical measurements — do these before tuning anything:**
 - Time 26 → 28 °C with the heater on. Target ~60–90 s.

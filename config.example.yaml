@@ -16,16 +16,15 @@ temperature:
     cool_rate: 0.012        # °C per second when heater off (~2.8 min for 28→26)
     noise: 0.02             # small random jitter, makes it feel real
 
-  # Real sensor (used when mode: real)
+  # Real sensor (used when mode: real) — polls the ESPHome web server (PROTOCOL §4).
+  # Polling runs on a background thread, so a hung/absent sensor holds the last
+  # reading and never stalls the 5 Hz loop.
   real:
-    ingestion: http         # "http" (poll ESPHome) or "mqtt"
+    ingestion: http         # HTTP poll is the only supported mode (CLAUDE.md: no MQTT broker)
     sensor_url: "http://192.168.8.30/sensor/water_temperature"
-    poll_hz: 2
-    timeout_s: 2.0
-    mqtt:                   # only used when ingestion: mqtt
-      broker: "192.168.8.10"
-      port: 1883
-      topic: "coral/sensor/water_temperature/state"
+    poll_hz: 2              # ESPHome sends ~1–2 Hz; no benefit polling faster
+    timeout_s: 2.0          # per-poll HTTP timeout
+    start_temp: 26.0        # reported until the first poll lands (system boots at state 0)
 
 # ─────────────────────────────────────────────────────────────
 # State machine — the thermal narrative.

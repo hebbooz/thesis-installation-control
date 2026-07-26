@@ -62,6 +62,62 @@ python tools/osc_monitor.py            # binds the 'ableton' static port (9010)
 
 Drive a full visitor arc from the keyboard: press `w`, watch the temperature climb and `intensity` rise, see state 1 engage, hold at 28 °C until the bleach latch fires, press `c`, sit through the recovery lag, watch it heal back to state 0. Walk away for three minutes and the idle reset returns it to Natural.
 
+### Verifying the plugs (Phase 4) without hardware
+
+`tools/fake_plug.py` emulates a Tasmota smart plug, so the actuation plane can be
+exercised with no real plugs. Run one per plug on its own port, point `config.yaml`
+at them, and set `plugs.enabled: true` (temperature can stay `simulated`):
+
+```bash
+# Terminals A/B/C — a stand-in plug each. Each prints a big ON/OFF banner per command.
+python tools/fake_plug.py --name heater --port 8091
+python tools/fake_plug.py --name fan    --port 8092
+python tools/fake_plug.py --name lamp   --port 8093
+```
+
+```yaml
+# config.yaml
+plugs:
+  enabled: true
+  heater: "http://127.0.0.1:8091"
+  fan:    "http://127.0.0.1:8092"
+  lamp:   "http://127.0.0.1:8093"
+```
+
+Now drive the fake rig: warming flips **heater on / fan off**, cooling flips them
+back, and the bleach latch blacks the **lamp** out until recovery. `Ctrl-C` a
+`fake_plug` mid-arc to simulate an unplug — the server logs `ACTUATE … FAILED` and
+keeps broadcasting, because plug I/O runs on a background worker and never blocks
+the loop.
+
+### Verifying the sensor (Phase 5) without hardware
+
+`tools/fake_sensor.py` emulates the ESPHome temperature endpoint, so `mode: real`
+can be exercised with no ESP32. It serves a keyboard-driven thermal ramp at the
+same URL the real sensor uses:
+
+```bash
+# Terminal A — the stand-in sensor. w/c ramp the served temperature; b blinds the probe.
+python tools/fake_sensor.py --port 8085
+```
+
+```yaml
+# config.yaml
+temperature:
+  mode: real
+  real:
+    sensor_url: "http://127.0.0.1:8085/sensor/water_temperature"
+```
+
+Start the server, then press `w`/`c` in the sensor's terminal: the server polls the
+endpoint, derives state, and broadcasts exactly as it will off the real DS18B20 —
+**nothing above the ingestion seam changes** between simulated and real. (In real
+mode the temperature comes from the sensor, so drive warm/cool from `fake_sensor`
+here rather than `fake_rig`; on the real rig the warm button additionally gates the
+heater and arms the bleach latch.) Press `b` to blind the probe mid-arc — the server
+logs `SENSOR read failed … holding last reading` and keeps broadcasting, because the
+poll runs on a background thread and never blocks the loop.
+
 ## Running with real hardware
 
 1. Set up the private network (separate 2.4 GHz and 5 GHz SSIDs — see `docs/HARDWARE.md`).
@@ -85,6 +141,11 @@ pytest
   scenario (warm/reverse, latch, recovery, idle reset) against the committed
   `config.example.yaml`.
 - `tests/test_broadcast.py` covers the client registry and the OSC bundle wire format.
+- `tests/test_actuation.py` covers the plug policy (warm/cool/lamp mapping), the
+  edge-driven commanding, and fail-soft behaviour when a plug is unreachable.
+- `tests/test_temperature.py` covers the real-sensor ingestion seam: parsing the
+  ESPHome reply, holding the last reading on a timeout/malformed/null response, and
+  the poll thread's lifecycle.
 - `tests/test_e2e.py` launches the real server on an isolated port and checks the
   OSC contract, registration, pruning, and startup-order independence over UDP.
 

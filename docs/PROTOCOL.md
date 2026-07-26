@@ -97,16 +97,18 @@ Failures must be non-fatal: log the error, continue deriving state from the real
 
 The sensor runs ESPHome. Two supported modes, chosen by config; the ingestion function isolates the difference so nothing downstream changes.
 
-**HTTP poll (default).** The server polls the ESPHome web server at 2–5 Hz:
+**HTTP poll (the only supported mode).** The server polls the ESPHome web server at `poll_hz` (default 2 Hz):
 
 ```
 GET http://<sensor-ip>/sensor/water_temperature
 → {"id":"sensor-water_temperature","value":26.4,"state":"26.4 °C"}
 ```
 
-**MQTT push (alternative).** If a broker is present, ESPHome publishes to a topic the server subscribes to. Functionally equivalent.
+The machine-readable `value` field is authoritative; the `state` string carries the unit for humans. Polling runs on a background thread so a slow or absent sensor never stalls the 5 Hz loop — the control loop only ever reads the last cached value.
 
-On timeout or malformed response: log, hold the last known temperature, continue. Optionally fall back to the simulated ramp for graceful degradation during an exhibition.
+**MQTT is out of scope.** ESPHome *can* publish over MQTT, but this system does not consume it: a broker is a message-broker dependency CLAUDE.md forbids, and HTTP polling of the local web server is simpler. Setting `ingestion` to anything but `http` is a clear startup error, not a silent fallback.
+
+On timeout or a malformed/null response (a disconnected probe reports `value: null` → NaN): log once, **hold the last known temperature**, and continue; log once more on recovery. The reading is never allowed to feed garbage into the state machine. Before the first successful poll the server reports `real.start_temp`, so it boots at state 0.
 
 ---
 
