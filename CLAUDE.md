@@ -39,7 +39,12 @@ Research context: the piece addresses "psychic numbing" around climate crisis by
 │   └── display.py             # tiny HTTP server for the temperature web page
 ├── tools/
 │   ├── fake_rig.py            # simulated temperature rig; keyboard = buttons
-│   └── fake_client.py         # pretend AR client: sends hello, prints broadcasts
+│   ├── fake_client.py         # pretend AR client: sends hello, prints broadcasts
+│   └── drive_projection.py    # drive the projection player without the server
+├── projection/                # Unity projection player (scripts only; no Unity project)
+│   ├── README.md              # setup, encoding guidance, the forward-only invariant
+│   ├── config.example.json    # copy to coral-projection.json beside the built .app
+│   └── Scripts/               # ProjectionConfig, CoralOscListener, ProjectionPlayer, CoralBlend
 ├── esphome/
 │   └── coral-temp-sensor.yaml # ESP32-C3 + DS18B20 config
 ├── docs/

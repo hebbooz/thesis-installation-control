@@ -1,0 +1,137 @@
+/// <summary>
+/// Configuration for the projection player — the Unity-side equivalent of the
+/// server's config.yaml. Every port, path and timing lives here so that moving
+/// the installation, re-exporting a clip, or retiming a fade is a file edit and
+/// never a rebuild (CLAUDE.md: "config, not code").
+///
+/// Loaded from a JSON file found next to the built application. Fail-soft: a
+/// missing or malformed config logs loudly and falls back to these defaults
+/// rather than refusing to start — an exhibition machine must always come up.
+/// </summary>
+using System;
+using System.IO;
+using UnityEngine;
+
+namespace Coral
+{
+    /// <summary>
+    /// Three looping state clips plus one short one-shot for the bleach latch.
+    /// There are no directional transition clips: every other change is an opacity
+    /// blend driven by the broadcast intensity.
+    /// </summary>
+    [Serializable]
+    public class ClipPaths
+    {
+        public string healthy = "coral-healthy.mp4";
+        public string fluorescent = "coral-fluorescent.mp4";
+        public string bleached = "coral-bleached.mp4";
+        public string latch = "coral-fluorescent-to-bleached.mp4";
+    }
+
+    [Serializable]
+    public class ProjectionConfig
+    {
+        public int osc_port = 9020;
+        public string video_dir = "";
+        public ClipPaths clips = new ClipPaths();
+        public float crossfade_s = 1.5f;
+
+        // Source frame size of the exported clips. Must be stated rather than
+        // detected, because the RenderTextures are built before any clip is
+        // prepared — and if a RenderTexture's aspect disagrees with the video's,
+        // Unity squashes the frame into it before the compositor ever sees it.
+        // The player logs a warning if a prepared clip disagrees with these.
+        public int video_width = 2560;
+        public int video_height = 1600;
+
+        // The spanned desktop: two 1280x800 projectors side by side.
+        public int display_width = 2560;
+        public int display_height = 800;
+        public bool fullscreen = true;
+
+        // How a source frame whose aspect differs from the canvas is mapped:
+        //   "cover"   fill the canvas, cropping the overflow (no distortion)
+        //   "contain" fit the whole frame, letterboxing the remainder
+        //   "stretch" force it to fit (distorts — only for deliberate anamorphic)
+        public string fit = "cover";
+
+        // Which part survives a "cover" crop, -1..+1, 0 = centred. If it pans the
+        // wrong way, flip the sign — texture V orientation varies by platform.
+        public float pan_x = 0f;
+        public float pan_y = 0f;
+
+        public bool log_transitions = true;
+
+        /// <summary>Directory the config was loaded from; clips resolve against it.</summary>
+        [NonSerialized] public string SourceDir = "";
+
+        const string FileName = "coral-projection.json";
+
+        /// <summary>
+        /// Locate and parse the config. Search order: an explicit
+        /// <c>--config &lt;path&gt;</c> command-line argument, then upward from the
+        /// player's data directory (which covers both a .app bundle and a plain
+        /// folder build), then StreamingAssets as the in-editor fallback.
+        /// </summary>
+        public static ProjectionConfig Load()
+        {
+            string path = Resolve();
+            if (path == null)
+            {
+                Debug.LogWarning($"[config] no {FileName} found — using built-in defaults");
+                return new ProjectionConfig();
+            }
+
+            try
+            {
+                var cfg = JsonUtility.FromJson<ProjectionConfig>(File.ReadAllText(path));
+                if (cfg == null) throw new Exception("parsed to null");
+                cfg.SourceDir = Path.GetDirectoryName(path);
+                Debug.Log($"[config] loaded {path}");
+                return cfg;
+            }
+            catch (Exception e)
+            {
+                // Malformed JSON must not stop the installation from booting.
+                Debug.LogError($"[config] failed to parse {path} ({e.Message}) — using defaults");
+                return new ProjectionConfig();
+            }
+        }
+
+        static string Resolve()
+        {
+            foreach (var arg in ArgPath()) if (arg != null && File.Exists(arg)) return arg;
+
+            // Walk up from Application.dataPath. A macOS build puts dataPath at
+            // Coral.app/Contents/Resources/Data, so the config sitting beside the
+            // bundle is four levels up; a folder build is one. Search rather than
+            // hard-code the depth so both layouts work unchanged.
+            var dir = new DirectoryInfo(Application.dataPath);
+            for (int i = 0; i < 6 && dir != null; i++, dir = dir.Parent)
+            {
+                string candidate = Path.Combine(dir.FullName, FileName);
+                if (File.Exists(candidate)) return candidate;
+            }
+
+            string streaming = Path.Combine(Application.streamingAssetsPath, FileName);
+            return File.Exists(streaming) ? streaming : null;
+        }
+
+        static string[] ArgPath()
+        {
+            var args = Environment.GetCommandLineArgs();
+            for (int i = 0; i < args.Length - 1; i++)
+                if (args[i] == "--config") return new[] { args[i + 1] };
+            return Array.Empty<string>();
+        }
+
+        /// <summary>Absolute file:// URL for a clip, or null if unset.</summary>
+        public string ResolveClip(string clip)
+        {
+            if (string.IsNullOrWhiteSpace(clip)) return null;
+            if (Path.IsPathRooted(clip)) return clip;
+            string baseDir = !string.IsNullOrWhiteSpace(video_dir) ? video_dir : SourceDir;
+            return string.IsNullOrEmpty(baseDir) ? clip : Path.Combine(baseDir, clip);
+        }
+    }
+}

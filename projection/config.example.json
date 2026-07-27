@@ -1,0 +1,35 @@
+{
+  "_comment": "Coral projection player — copy to coral-projection.json and edit. Mirrors config.yaml's role for the server: every port, path and timing lives here, never in code.",
+
+  "osc_port": 9020,
+
+  "video_dir": "",
+  "_video_dir_note": "Absolute path to the folder holding the exported clips. Leave \"\" to resolve clips relative to this config file's own directory.",
+
+  "clips": {
+    "healthy": "coral-healthy.mp4",
+    "fluorescent": "coral-fluorescent.mp4",
+    "bleached": "coral-bleached.mp4",
+    "latch": "coral-fluorescent-to-bleached.mp4"
+  },
+  "_clips_note": "Three loops plus one one-shot. healthy/fluorescent/bleached loop forever and their lengths do not affect behaviour (60s recommended). latch plays once on the 1->2 bleach latch and is 20s. Its bound is crossfade_s < length < recovery_lag_s (1.5s < 20s < 30s): state 2 cannot be shorter than recovery_lag_s, so a clip under that can never be cut short mid-telling. WITH A 20s CLIP THE MARGIN IS 10s — do not lower recovery_lag_s below ~25s without shortening this clip. There are no directional transition clips; every other change is an opacity blend driven by intensity.",
+
+  "crossfade_s": 1.5,
+  "_crossfade_note": "One fade rate for everything. Also acts as the slew limit on the state 0/1 intensity blend, and as the lead-in used to hand a one-shot over before its last frame (so the clip never freezes while fading).",
+
+  "video_width": 2560,
+  "video_height": 800,
+  "_video_size_note": "Native frame size of the exported clips — same as the canvas, so every source pixel maps to one projector pixel. Stated, not detected: the RenderTextures are built before any clip is prepared, and a RenderTexture whose aspect disagrees with the video squashes the frame before the compositor sees it. The player logs a warning at startup if a prepared clip disagrees with these numbers.",
+
+  "display_width": 2560,
+  "display_height": 800,
+  "fullscreen": true,
+  "_display_note": "Spanned canvas across both Epson EB-435W (1280x800 each). macOS Displays must be set to Extend, arranged side by side — that is an OS setting, not something this player controls.",
+
+  "fit": "cover",
+  "pan_x": 0.0,
+  "pan_y": 0.0,
+  "_fit_note": "With source and canvas both 2560x800 this is a no-op (scale 1,1 offset 0,0) and pan is irrelevant. It stays as a safety net: if a clip is ever exported at the wrong size, 'cover' crops to fill without distorting rather than silently squashing. Watch for the startup warning instead of relying on it.",
+
+  "log_transitions": true
+}
