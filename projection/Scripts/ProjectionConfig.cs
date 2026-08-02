@@ -125,13 +125,26 @@ namespace Coral
             return Array.Empty<string>();
         }
 
-        /// <summary>Absolute file:// URL for a clip, or null if unset.</summary>
+        /// <summary>
+        /// Absolute path for a clip, or null if unset. A relative <c>video_dir</c>
+        /// resolves against the config file's own directory, not the process
+        /// working directory — that is what lets the whole thing be a portable
+        /// bundle (.app + config + video/ folder) that works wherever it is copied,
+        /// including onto the cold-restore USB.
+        /// </summary>
         public string ResolveClip(string clip)
         {
             if (string.IsNullOrWhiteSpace(clip)) return null;
             if (Path.IsPathRooted(clip)) return clip;
-            string baseDir = !string.IsNullOrWhiteSpace(video_dir) ? video_dir : SourceDir;
-            return string.IsNullOrEmpty(baseDir) ? clip : Path.Combine(baseDir, clip);
+
+            string baseDir = SourceDir;
+            if (!string.IsNullOrWhiteSpace(video_dir))
+            {
+                baseDir = Path.IsPathRooted(video_dir)
+                    ? video_dir
+                    : Path.Combine(SourceDir ?? "", video_dir);
+            }
+            return string.IsNullOrEmpty(baseDir) ? clip : Path.GetFullPath(Path.Combine(baseDir, clip));
         }
     }
 }
