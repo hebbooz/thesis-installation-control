@@ -279,7 +279,7 @@ Default: server **polls** the sensor over HTTP at 2–5 Hz (simple, firewall-fre
 - **2→3:** entered only after the cool target is set *and* the recovery lag elapses; visibly bleached during the lag (the cool button is not an undo).
 - **3→2 (re-bleach):** setting the warm target *during* recovery cancels the heal and returns to State 2. **Subscribers must handle this backward transition.**
 - **3→0:** on completion of the heal ramp **and** once T has returned below `rise_threshold`. State 3 therefore persists at intensity 0 until the water is actually cool, so the coral never flickers back to Fluorescent on the way out — meaning **State 3 may outlast `recovery_ramp_s`.**
-- **Idle reset:** no input for `idle_timeout_s` (3 min) → server clears any latch and sets target = 26 °C, then converges to State 0 via normal cooling (no teleport — honest for real water; the coral cools through State 1 to Natural).
+- **Idle reset:** no input for `idle_timeout_s` (3 min) → server sets target = 26 °C and nothing else. It does **not** clear the latch: an unattended bleached coral runs the ordinary recovery lag and ramp (State 2 → 3 → 0), the same path a deliberate cool press produces. Un-latched, it simply converges to State 0 via normal cooling (no teleport — honest for real water). The earlier 2 → 1 shortcut was removed because it asserted that bleaching undoes itself when nobody is watching, which inverts the argument the piece is making.
 - **Conflict resolution:** cool target wins.
 - **Cold start:** all components assume State 0 until the first broadcast/first sensor reading.
 

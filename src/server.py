@@ -21,7 +21,8 @@ from actuation import PlugController
 from broadcast import Broadcaster
 from config import REPO_ROOT, load_config
 from inputs import ButtonReader
-from state import CoralState
+from quantize import BedQuantizer
+from state import STATE_NAMES, CoralState
 from temperature import make_source
 
 # Internal loop runs SUBTICKS× faster than the broadcast rate (5 Hz -> 20 Hz) so
@@ -87,6 +88,10 @@ def main() -> None:
     # Physical arcade buttons (USB HID gamepad). Reports (False, False) when disabled
     # or no encoder is attached, so the OSC harness path below is always available.
     buttons = ButtonReader(cfg["input"], log)
+    # Bar-quantises the soundscape's bed cue against Live's MIDI clock. Pure
+    # pass-through when disabled or when no clock arrives, so it is safe to
+    # construct unconditionally and in every no-Ableton scenario.
+    quant = BedQuantizer(cfg.get("quantize", {}), log)
 
     broadcast_hz = float(cfg["broadcast"]["rate_hz"])
     dt = 1.0 / (broadcast_hz * SUBTICKS)
@@ -127,16 +132,27 @@ def main() -> None:
             # every tick and reacts to a button-driven target change immediately.
             plugs.update(state.target, state.state)
 
+            # 3c. Bed cue: state held back to the next musical boundary when Live's
+            # clock is available, otherwise identical to state.
+            bed, bed_moved = quant.update(state.state, now)
+            if bed_moved:
+                log.info("BED -> %d (%s)", bed, STATE_NAMES[bed])
+
             # 4. Broadcast + prune at the configured rate (every SUBTICKS ticks).
-            if tick % SUBTICKS == 0:
+            # A bed change landing between broadcasts is emitted immediately: waiting
+            # up to 200 ms for the next scheduled one would drop the audio cut behind
+            # the bar line we just waited for.
+            broadcast_tick = tick % SUBTICKS == 0
+            if broadcast_tick:
                 for cid in bc.registry.prune(now):
                     log.info("CLIENT pruned (silent >%.0fs): %s", bc.registry.timeout_s, cid)
-                bc.emit(state.state, state.intensity, temp)
-                if log_samples:
-                    sample_log.info(
-                        "SAMPLE temp=%.3f target=%.1f state=%d intensity=%.3f",
-                        temp, state.target, state.state, state.intensity,
-                    )
+            if broadcast_tick or bed_moved:
+                bc.emit(state.state, state.intensity, temp, bed, state.latch_progress)
+            if broadcast_tick and log_samples:
+                sample_log.info(
+                    "SAMPLE temp=%.3f target=%.1f state=%d intensity=%.3f bed=%d",
+                    temp, state.target, state.state, state.intensity, bed,
+                )
             tick += 1
 
             # 5. Fixed-tick pacing against a monotonic clock; resync if we fall behind.
@@ -150,6 +166,7 @@ def main() -> None:
         log.info("interrupt received — shutting down")
     finally:
         source.close()   # stop the sensor poll thread (no-op in simulated mode)
+        quant.close()    # release the MIDI clock input (no-op when disabled)
         plugs.close()
         buttons.close()  # release the gamepad backend (no-op when disabled)
         bc.close()

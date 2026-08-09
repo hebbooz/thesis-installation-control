@@ -76,9 +76,11 @@ Paths worth knowing about, all handled:
 
 - **3 → 2, recovery cancelled** by re-warming. Intensity snaps back to 1.0 and
   the weight simply travels back toward bleached. Nothing to restart.
-- **2 → 1** via the server's 180 s idle reset, which clears the latch while the
-  water is still hot (state 1 at intensity ≈ 1.0). Cross-fades bleached →
-  fluorescent. Nothing rewinds.
+- **2 → 1** is no longer produced by the server: the idle reset presses cool and
+  leaves the latch alone, so walking away heals 2 → 3 → 0 like any other recovery.
+  The player still handles the transition (cross-fades bleached → fluorescent,
+  nothing rewinds) — it costs nothing and keeps the player total over the state
+  space rather than over the paths the server happens to emit today.
 - **3 → 0** on completion. Intensity is already 0, so both rules agree on pure
   healthy and nothing changes visually.
 - **Cold start directly into state 2** skips the latch clip and cuts to the
@@ -88,6 +90,35 @@ Paths worth knowing about, all handled:
 ---
 
 ## Setup
+
+The project has already been created at
+`../../projection-mapping/coral-projection-player` (Unity 6000.5.3f1, the same
+editor the AR client uses). It is not version-controlled — `Assets/Editor/CoralSetup.cs`
+inside it rebuilds the whole thing headlessly, so it never has to be assembled by
+hand again:
+
+```bash
+cd "../projection-mapping/coral-projection-player"
+/Applications/Unity/Hub/Editor/6000.5.3f1/Unity.app/Contents/MacOS/Unity \
+  -batchmode -nographics -quit -projectPath "$PWD" \
+  -executeMethod Coral.Editor.CoralSetup.Build
+```
+
+That sets Linear color space, builds the scene (camera + ProjectionPlayer with
+the blend shader assigned), and writes `Build/CoralProjection.app`. After editing
+anything in `Scripts/`, copy it into the project's `Assets/CoralProjection/` and
+re-run the command.
+
+Two things that project needs and a bare Unity project does not have:
+
+- **extOSC**, vendored as an embedded package in `Packages/com.iam1337.extosc`
+  (copied from the AR client, so both ends speak the same library).
+- **`com.unity.ugui`**, added to `Packages/manifest.json`. extOSC ships UI
+  helpers that import `UnityEngine.UI`, which a bare Unity 6 project omits — 
+  without it the project fails to compile with ~200 `CS0234` errors that have
+  nothing to do with this player.
+
+The manual equivalent, if the project ever has to be rebuilt from the GUI:
 
 **Unity 2022.3 LTS or newer, Built-In Render Pipeline.**
 
@@ -299,8 +330,9 @@ interleaved senders will make the state appear to flicker.
 This tool exists for two things the real server cannot do: hold a state still
 (alignment, keystone, focus, black-level matching between the two units need a
 fixed image for minutes, and the server is always drifting toward a target), and
-reach the rare paths on demand (3→2→3 recovery-cancelled, and the 2→1 idle-reset
-exit each take minutes of real water to provoke).
+reach the rare paths on demand (3→2→3 recovery-cancelled takes minutes of real
+water to provoke, and 2→1 the server no longer emits at all, so this is the only
+way to exercise it).
 
 **With the server** — the normal path. `config.yaml` already lists projection as
 a static subscriber, so nothing needs registering:
@@ -320,6 +352,8 @@ Transitions are logged with timestamps to Unity's `Player.log`
 
 | Symptom | Cause |
 |---|---|
+| ~200 `CS0234` errors in `Packages/com.iam1337.extosc/Scripts/UI/` | `com.unity.ugui` missing from `Packages/manifest.json` — see Setup |
+| Colours shifted vs the Unreal render | Clips carry no colour-primaries tag; `AVFoundationVideoMedia` logs it and falls back. Tag the exports bt709. |
 | Black screen, no errors | URP/HDRP project — `OnRenderImage` never fires. Must be Built-In RP. |
 | Black screen, `[blend]` error | Blend Shader field not assigned on the component |
 | Midtones sag during the long fade | Color Space is Gamma, not Linear |

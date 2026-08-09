@@ -18,6 +18,23 @@ Emitted as an OSC bundle at a fixed rate (default 5 Hz, configurable) to every s
 | `/coral/state` | int32 | 0–3 | Discrete phase — used to *switch* (which clip, which material set) |
 | `/coral/intensity` | float32 | 0.0–1.0 | Continuous severity — used to *interpolate* (dim, cross-fade, colour) |
 | `/coral/temp` | float32 | °C | Live temperature, for display and reference |
+| `/coral/bed` | int32 | 0–3 | `state`, delayed to the next musical boundary. **Audio only.** |
+| `/coral/latch` | float32 | 0.0–1.0 | Progress toward the bleach latch — the one *forward-looking* value |
+
+`/coral/bed` exists because the soundscape switches between 16-bar loops and a
+cut landing mid-bar reads as a glitch. It is identical to `/coral/state` unless
+`quantize.enabled` **and** MIDI clock is arriving, so a subscriber maps it
+unconditionally and never needs to know which mode the server is in. Only the
+audio subscriber should use it — delaying the projection or AR by up to half a
+loop would break the cross-modal simultaneity the piece depends on.
+
+`/coral/latch` is the only quantity that describes something that has not
+happened yet. Bleaching requires `latch_hold_s` of sustained heat, so during that
+window the outcome is already determined and merely unspent; publishing it as a
+ramp lets an output *anticipate* the latch (a riser, a swell) rather than only
+react to it. It retreats to 0.0 if the hold breaks, and pins at 1.0 for as long
+as the latch itself holds. It is **not** a substitute for `state`: reaching 1.0
+is what causes state 2, not what reports it.
 
 ### Subscriber contract
 

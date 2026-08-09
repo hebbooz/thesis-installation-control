@@ -205,9 +205,12 @@ namespace Coral
             {
                 case 0:
                 case 1:
-                    // Also the path out of state 2 via the server's 180 s idle reset,
-                    // which clears the latch while the water is still hot. The weight
-                    // simply crossfades bleached -> fluorescent; nothing rewinds.
+                    // Also covers a 2 -> 1 arrival. The server no longer emits one
+                    // (its idle reset presses cool and leaves the latch, so an
+                    // unattended bleach heals 2 -> 3 -> 0), but handling it costs
+                    // nothing: the weight crossfades bleached -> fluorescent and
+                    // nothing rewinds. Total over the state space, not over the
+                    // paths the server happens to emit today.
                     _mode = Mode.Continuous;
                     break;
 

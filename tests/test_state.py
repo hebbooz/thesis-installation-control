@@ -197,6 +197,108 @@ def test_idle_reset_returns_to_natural(cfg):
     assert st.state == 2
     advance(st, src, seconds=cfg["state"]["idle_timeout_s"] + 1)  # walk away
     assert st.target == cfg["targets"]["cool"]
-    assert not st.bleach_latched
+    # The latch survives: idle presses the cool button, it does not un-bleach.
+    assert st.bleach_latched
     advance(st, src, seconds=300)  # let it cool
     assert st.state == 0
+
+
+def test_idle_reset_heals_through_recovery(cfg):
+    """A visitor who bleaches the coral and walks away still gets the full heal.
+
+    The unattended path must be the same 2 -> 3 -> 0 a deliberate cool press
+    produces; a bleached coral recovers, it is never un-bleached.
+    """
+    st, src = make_system(cfg)
+    bleach(st, src)
+
+    seen = []
+    for _ in range(int(600 / DT)):
+        st.update(src.read(DT), DT)
+        st.drain_events()
+        if not seen or seen[-1] != st.state:
+            seen.append(st.state)
+        if st.state == 0:
+            break
+
+    assert seen == [2, 3, 0], f"expected 2->3->0 unattended, got {seen}"
+
+
+def test_idle_reset_does_not_refire_during_the_heal(cfg):
+    """Once cooling is commanded there is nothing left to reset, so the timer must
+    not keep firing through a heal that outlasts idle_timeout_s."""
+    st, src = make_system(cfg)
+    bleach(st, src)
+
+    resets = 0
+    for _ in range(int(600 / DT)):
+        st.update(src.read(DT), DT)
+        resets += sum("IDLE reset" in e for e in st.drain_events())
+        if st.state == 0:
+            break
+
+    assert resets == 1, f"idle reset fired {resets} times, expected once"
+
+
+def test_recovery_exit_does_not_flicker_back_to_fluorescent(cfg):
+    """3 -> 0 must not bounce to 1. Exiting at rise_threshold hands over at exactly
+    the temperature that re-engages state 1, and sensor noise does the rest."""
+    st, src = make_system(cfg, noise=0.02)   # noise ON — this is what triggered it
+    bleach(st, src)
+    st.apply_input(False, True)              # deliberate cool
+
+    seen = []
+    for _ in range(int(600 / DT)):
+        st.update(src.read(DT), DT)
+        st.drain_events()
+        if not seen or seen[-1] != st.state:
+            seen.append(st.state)
+        if len(seen) >= 3 and seen[-1] == 0:
+            break
+
+    assert seen == [2, 3, 0], f"flickered on the way out: {seen}"
+
+
+# ------------------------------------------------------------------ latch anticipation
+def test_latch_progress_is_zero_when_nothing_is_pending(cfg):
+    st, src = make_system(cfg)
+    assert st.latch_progress == 0.0
+    advance(st, src, seconds=10)          # idle and cool
+    assert st.latch_progress == 0.0
+
+
+def test_latch_progress_ramps_through_the_hold_and_pins_at_one(cfg):
+    """The 10 s sustained hold is the window in which the outcome is already
+    decided but not yet spent — it is what an anticipatory riser rides."""
+    st, src = make_system(cfg)
+    st.apply_input(True, False)
+
+    seen_partial = False
+    for _ in range(int(160 / DT)):
+        st.update(src.read(DT), DT)
+        st.drain_events()
+        assert 0.0 <= st.latch_progress <= 1.0
+        if st.state == 1 and 0.05 < st.latch_progress < 0.95:
+            seen_partial = True
+        if st.state == 2:
+            break
+
+    assert seen_partial, "no ramp observed before the latch — nothing to anticipate with"
+    assert st.latch_progress == 1.0       # holds at full once latched
+
+
+def test_latch_progress_retreats_when_the_hold_breaks(cfg):
+    """Cooling before the latch has to walk the anticipation back, or the sound
+    would promise a bleach the state machine then declines to deliver."""
+    st, src = make_system(cfg)
+    st.apply_input(True, False)
+    for _ in range(int(160 / DT)):
+        st.update(src.read(DT), DT)
+        st.drain_events()
+        if st.latch_progress > 0.4:
+            break
+    assert not st.bleach_latched, "needed a partial hold, not a completed one"
+
+    advance(st, src, seconds=5, cool=True)
+    assert st.latch_progress == 0.0
+    assert st.state != 2

@@ -68,7 +68,7 @@ Research context: the piece addresses "psychic numbing" around climate crisis by
 
 Additional rules:
 - Buttons set a **target** (warm → 28.0, cool → 26.0). Idempotent. **Cool wins** on conflict.
-- **Idle reset:** no input for 180 s → target = 26.0, return to state 0.
+- **Idle reset:** no input for 180 s → target = 26.0. It presses the cool button and nothing more — the latch is **not** cleared, so a bleached coral left alone heals 2 → 3 → 0 exactly as a deliberate cool press would. A bleached coral recovers; it is never un-bleached.
 - Broadcast rate 5 Hz; this doubles as the heartbeat. There is no separate keep-alive.
 - Cold start: everything assumes state 0 until the first reading/broadcast.
 

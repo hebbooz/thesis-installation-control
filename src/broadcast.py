@@ -110,9 +110,10 @@ class Broadcaster:
                     extras.append((msg.address, list(msg.params)))
         return extras, newly
 
-    def emit(self, state: int, intensity: float, temp: float) -> None:
+    def emit(self, state: int, intensity: float, temp: float,
+             bed: int | None = None, latch: float = 0.0) -> None:
         """Send one bundle to every static subscriber and every registered client."""
-        dgram = _build_bundle(state, intensity, temp)
+        dgram = _build_bundle(state, intensity, temp, bed, latch)
         targets = [(host, port) for (host, port, _) in self.static]
         targets += self.registry.addresses()
         for target in targets:
@@ -125,12 +126,23 @@ class Broadcaster:
         self._sock.close()
 
 
-def _build_bundle(state: int, intensity: float, temp: float) -> bytes:
-    """Build the canonical OSC bundle: /coral/state i, /coral/intensity f, /coral/temp f."""
+def _build_bundle(state: int, intensity: float, temp: float,
+                  bed: int | None = None, latch: float = 0.0) -> bytes:
+    """Build the canonical OSC bundle (PROTOCOL.md §1).
+
+    ``bed`` is the bar-quantised twin of ``state`` used by the soundscape. It
+    defaults to ``state``, so the address is always present and a subscriber can
+    map it unconditionally whether or not quantisation is switched on.
+
+    ``latch`` is progress toward the bleach latch — the one forward-looking value
+    in the protocol.
+    """
     bundle = OscBundleBuilder(IMMEDIATELY)
     bundle.add_content(_message("/coral/state", int(state)))        # int32
     bundle.add_content(_message("/coral/intensity", float(intensity)))  # float32
     bundle.add_content(_message("/coral/temp", float(temp)))        # float32
+    bundle.add_content(_message("/coral/bed", int(state if bed is None else bed)))  # int32
+    bundle.add_content(_message("/coral/latch", float(latch)))      # float32
     return bundle.build().dgram
 
 

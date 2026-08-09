@@ -11,9 +11,10 @@ Two jobs the real server cannot do:
     and black-level matching between the two projectors need a fixed image for
     minutes at a time. The server is always drifting toward a target — it has no
     "pause". Here, a state stays put until you change it.
-  * **Reach rare paths on demand.** Recovery-cancelled (3→2→3) and the idle-reset
-    exit (2→1 with intensity still 1.0) each take minutes of real water to
-    provoke. Press two keys instead.
+  * **Reach rare paths on demand.** Recovery-cancelled (3→2→3) and a 2→1 arrival
+    (intensity still 1.0) each take minutes of real water to provoke — and 2→1 the
+    server no longer emits at all, so this is the only way to exercise the player's
+    handling of it. Press two keys instead.
 
 This does NOT shorten the latch or the recovery lag — those live in config.yaml and
 stay exactly as authored (CLAUDE.md). It bypasses the state machine entirely rather

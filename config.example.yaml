@@ -65,6 +65,31 @@ broadcast:
   client_timeout_s: 15      # prune registry entries idle longer than this
 
 # ─────────────────────────────────────────────────────────────
+# Quantise — hold the soundscape's bed cue back to a musical boundary.
+#
+# The four audio beds are 16-bar loops; switching them mid-bar reads as a glitch
+# rather than a transition. Live is the clock master here: it sends MIDI clock to
+# a virtual (IAC) bus, the server counts pulses to find the bar line, and
+# /coral/bed changes only there. /coral/state stays immediate, so the projection
+# and the AR clients are never delayed by the music.
+#
+# This is the one place anything talks *back* to the server (CLAUDE.md principle 2),
+# and what crosses is a clock, never state. With no clock arriving — Live closed,
+# transport stopped, IAC not set up — /coral/bed is identical to /coral/state and
+# the system behaves exactly as it did before. Ableton is never a dependency.
+#
+# Setup: Audio MIDI Setup > enable the IAC Driver, then in Live
+# Settings > Link/Tempo/MIDI turn on **Sync** for that output.
+# ─────────────────────────────────────────────────────────────
+quantize:
+  enabled: false            # true once the IAC bus exists and Live is sending Sync
+  midi_clock_port: "IAC"    # substring, case-insensitive, matched against input names
+  quantize_bars: 8          # 8 of a 16-bar loop = the cut lands on bar 1 or bar 9
+  beats_per_bar: 4
+  lead_ms: 0                # fire this early to absorb tick + OSC + Live latency
+  stale_s: 1.0              # no clock for this long -> publish immediately (fail soft)
+
+# ─────────────────────────────────────────────────────────────
 # Actuation — Tasmota smart plugs (local HTTP, no cloud)
 # ─────────────────────────────────────────────────────────────
 plugs:

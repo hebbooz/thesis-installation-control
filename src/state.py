@@ -67,6 +67,24 @@ class CoralState:
         return STATE_NAMES[self.state]
 
     @property
+    def latch_progress(self) -> float:
+        """How close the bleach is, 0.0-1.0 — the only quantity that sees it coming.
+
+        Bleaching requires ``latch_hold_s`` of sustained heat, so for those seconds
+        the outcome is already determined and merely unspent. Publishing that as a
+        ramp lets an output *anticipate* the latch (a riser, a swell, a brightening)
+        instead of only reacting to it, and lets the anticipation retreat when the
+        hold breaks — which is exactly the reversibility the piece is arguing about.
+
+        Holds at 1.0 once latched, for as long as the latch itself holds.
+        """
+        if self.bleach_latched:
+            return 1.0
+        if self.latch_hold_s <= 0:      # config could disable the hold entirely
+            return 0.0
+        return _clamp(self._latch_timer / self.latch_hold_s, 0.0, 1.0)
+
+    @property
     def cooling(self) -> bool:
         """True when the commanded target is the cool one.
 
@@ -102,12 +120,18 @@ class CoralState:
         self.temp = temperature
         self._idle_timer += dt
 
-        # Idle reset: nobody has touched it for idle_timeout_s. Release any latch
-        # and command cooling so the piece returns itself to Natural for the next
-        # visitor. Derivation below then cools smoothly (no forced teleport — real
-        # water can't be teleported, and neither should the simulation).
+        # Idle reset: nobody has touched it for idle_timeout_s. Command cooling so
+        # the piece returns itself to Natural for the next visitor. It does NOT
+        # touch the latch — a bleached coral recovers, it is never un-bleached, so
+        # the walk-away path runs the same 2 -> 3 -> 0 heal a cool press would.
+        # Derivation below then cools smoothly (no forced teleport — real water
+        # can't be teleported, and neither should the simulation).
+        #
+        # Guard on the target alone: with the latch left in place there is nothing
+        # else to reset, so once cooling is commanded the timer has no more work
+        # and stops re-firing every idle_timeout_s through the long heal.
         if self._idle_timer >= self.idle_timeout_s:
-            if self.bleach_latched or self.target != self.cool_target:
+            if self.target != self.cool_target:
                 self._idle_reset()
             self._idle_timer = 0.0
 
@@ -172,8 +196,16 @@ class CoralState:
 
         Re-warming cancels recovery and re-bleaches (back to state 2). Otherwise
         intensity heals over recovery_ramp_s; the latch only clears once healed
-        *and* the water has actually returned below the rise threshold, so the
-        coral never flickers back to Fluorescent on the way out.
+        *and* the water is all the way back to temp_natural, so the coral never
+        flickers back to Fluorescent on the way out.
+
+        That exit anchor is temp_natural, **not** rise_threshold, even though the
+        latter reads as the natural/fluorescent boundary. Leaving at exactly
+        rise_threshold hands over to _derive_reversible at the very temperature
+        that re-engages state 1, so a few hundredths of sensor noise bounce it
+        straight back to Fluorescent — 3 -> 0 -> 1 within one second, then a
+        further 0.2 °C of cooling to escape. Exiting at the *bottom* of the
+        hysteresis band lands the handover with the whole band as margin.
         """
         if not self.cooling:
             self._recovering = False
@@ -187,7 +219,7 @@ class CoralState:
         progress = _clamp(self._ramp_timer / self.recovery_ramp_s, 0.0, 1.0)
         self.intensity = 1.0 - progress
         self._set_state(3)
-        if progress >= 1.0 and temperature <= self.rise_threshold:
+        if progress >= 1.0 and temperature <= self.temp_natural:
             self._clear_latch()
             self.intensity = 0.0
             self._set_state(0, "recovered")
@@ -201,10 +233,16 @@ class CoralState:
         self._ramp_timer = 0.0
 
     def _idle_reset(self) -> None:
-        was_latched = self.bleach_latched
-        self._clear_latch()
+        """Command cooling on behalf of a visitor who has walked away.
+
+        Deliberately leaves the latch alone. Clearing it here would teleport a
+        bleached coral back to Fluorescent with the water still hot — the piece
+        would be asserting that bleaching undoes itself when nobody is watching,
+        which is the opposite of what it argues. Instead this only presses the cool
+        button, and the ordinary recovery lag and ramp carry it 2 -> 3 -> 0.
+        """
         self.target = self.cool_target
-        note = "bleach released" if was_latched else "returning to natural"
+        note = "recovering" if self.bleach_latched else "returning to natural"
         self.events.append(
             f"IDLE reset after {self.idle_timeout_s:.0f}s idle — "
             f"target {self.cool_target:.1f} ({note})"

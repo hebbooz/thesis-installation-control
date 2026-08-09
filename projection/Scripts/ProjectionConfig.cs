@@ -42,7 +42,7 @@ namespace Coral
         // Unity squashes the frame into it before the compositor ever sees it.
         // The player logs a warning if a prepared clip disagrees with these.
         public int video_width = 2560;
-        public int video_height = 1600;
+        public int video_height = 800;
 
         // The spanned desktop: two 1280x800 projectors side by side.
         public int display_width = 2560;

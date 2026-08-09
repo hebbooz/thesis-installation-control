@@ -28,12 +28,14 @@ intensity, what should the room sound like?*
 ## The contract you're subscribing to
 
 The server fans out an OSC bundle to UDP **9010** (localhost) at 5 Hz. Each bundle
-carries three messages (full spec in [PROTOCOL.md](PROTOCOL.md)):
+carries five messages (full spec in [PROTOCOL.md](PROTOCOL.md)):
 
 | Address | Type | Range | Use it to… |
 |---|---|---|---|
-| `/coral/intensity` | float32 | `0.0 – 1.0` | **interpolate** — the primary continuous driver. Crossfader + macros. |
-| `/coral/state` | int32 | `0 – 3` | **switch** — discrete phase. Optional one-shot at the bleach latch. |
+| `/coral/bed` | int32 | `0 – 3` | **switch** — which of the four beds is audible. Bar-locked. |
+| `/coral/intensity` | float32 | `0.0 – 1.0` | **interpolate** — continuous colour *within* a bed |
+| `/coral/latch` | float32 | `0.0 – 1.0` | **anticipate** — ramps across the 10 s hold *before* the bleach |
+| `/coral/state` | int32 | `0 – 3` | immediate, unquantised. Prefer `bed` for switching. |
 | `/coral/temp` | float32 | °C | reference only; not usually mapped to sound |
 
 The narrative these values trace (from [BUILD_ORDER.md](BUILD_ORDER.md) and the
@@ -41,14 +43,21 @@ state machine in [../CLAUDE.md](../CLAUDE.md)):
 
 | State | Name | intensity | What the soundscape does |
 |---|---|---|---|
-| 0 | Natural | ~0.0 | full natural bed; reef alive |
-| 1 | Fluorescent | rising, **reversible** | natural bed degrades continuously; industrial layer bleeds in |
-| 2 | Bleached | ~1.0, **latched** | industrial dominates; the bleach one-shot fires; then stillness |
-| 3 | Recovery | falling after a lag | stays bleached through the lag, then heals back toward natural |
+| 0 | Natural | ~0.0 | the natural bed; reef alive |
+| 1 | Fluorescent | rising, **reversible** | the fluorescent bed, pushed harder as intensity climbs |
+| 2 | Bleached | ~1.0, **latched** | the bleached bed, arriving on the bar after the riser resolves |
+| 3 | Recovery | falling after a lag | the recovery bed, healing as intensity walks back to 0 |
 
-The key point for mapping: **`intensity` is a single continuous 0→1 knob for the
-whole arc.** Crossfade natural↔industrial across it and most of the piece works
-before you touch a macro.
+Two points that shape every mapping below:
+
+**`bed` switches, `intensity` shades.** The four beds are mutually exclusive and
+`bed` picks one; `intensity` moves things *inside* whichever bed is playing. Never
+derive the bed from `intensity` — it is ambiguous. `1.0` is both state 2 and the
+first 30 s of state 3, and `0.5` is state 1 warming *and* state 3 healing.
+
+**`latch` is the only value that sees the future.** Everything else reports what
+is already true. `latch` reports what is about to be, which is what lets the
+soundscape lead the bleach instead of chasing it.
 
 ---
 
@@ -154,90 +163,162 @@ blocking the app — see *Troubleshooting*.
 
 ---
 
-## Step 3 — Build two stem groups and a crossfader
+## Step 3 — Four beds, all playing at once
 
-The musical structure that makes `intensity` do almost all the work:
+The instinct is to *start* the right loop when the state changes. Don't. Live has
+no way to start something on cue from a mapped parameter, and a loop that starts
+from cold is never in sync with the one it replaced.
 
-1. Two parallel stem groups:
-   - **`NATURAL`** — the healthy reef bed (field recordings, warm pads, life).
-   - **`INDUSTRIAL`** — the degraded/bleached layer (drones, noise, cold tones).
-   Build each as a **Group track** so you have one volume/level per side.
-2. Assign the crossfader:
-   - In the Session mixer, set the **crossfade assign** on `NATURAL` to **A** and
-     on `INDUSTRIAL` to **B** (the `A · B` buttons per track).
-   - The master **crossfader** now morphs A→B. Fully **A** = pure natural, fully
-     **B** = pure industrial.
+Instead: **all four 16-bar beds play continuously, forever, and you only change
+which one is audible.** Lay them out as four group tracks — one per state — in
+Arrangement View with the loop brace around the 16 bars, or as four clips in one
+Session scene. Press play once. They stay phase-locked for the whole exhibition,
+so a switch cuts from bar 9 of one bed to bar 9 of the next, never mid-phrase.
 
-Author it so that **A = healthy = intensity 0** and **B = bleached = intensity 1**.
-
----
-
-## Step 4 — Map `intensity` → crossfader (the core mapping)
-
-Both recommended devices work the same way: each incoming address gets a **slot**,
-a **Map / Learn** button, and a **Min/Max** range that scales the value onto the
-target parameter. (In OSC Mapper one slot fans out to up to 4 targets — use that to
-drive the crossfader *and* the Step 5 macros from this single `/coral/intensity`.)
-
-1. In the OSC receiver, add / select the slot for address **`/coral/intensity`**.
-2. Set its input range to **Min `0.0`, Max `1.0`** (the value already arrives
-   normalized — this just says "don't rescale").
-3. Click that slot's **Map**, then click the **crossfader** in Live's mixer.
-4. Confirm direction: at `intensity 0` the crossfader sits at **A** (natural); at
-   `intensity 1` it's at **B** (industrial). If it's inverted, swap the A/B
-   assignments (Step 3) or swap the slot's Min/Max.
-
-Test the whole arc now with the fake rig. Warming should slide the crossfader
-smoothly toward industrial; cooling *before the latch* slides it back (state 1 is
-reversible); once state 2 latches, `intensity` pins near 1.0 and the crossfader
-sits at industrial until recovery — exactly the thematic behaviour, driven entirely
-by the server. **Do not** add your own smoothing that fights the latch; the arc is
-the server's to shape.
-
-> **If the crossfader won't accept the map:** some setups won't let a M4L device
-> map the master crossfader directly. Fallback that always works — map
-> `/coral/intensity` to `INDUSTRIAL` group **volume** (0→1 quiet→loud) and, on a
-> second slot with **Min/Max inverted** (`1.0 → 0.0`), to `NATURAL` group volume.
-> Two inverse volume maps = a manual crossfade.
+"Playing at the appropriate time" is therefore a *volume* change, which is exactly
+what the OSC receiver can drive.
 
 ---
 
-## Step 5 — Map 2–3 macros for continuous degradation
+## Step 4 — Map `/coral/bed` to the four groups
 
-The crossfade alone is a hard A/B blend. These extra continuous maps make the
-*degradation itself* audible. Map `/coral/intensity` (same address, more slots — or
-duplicate the device) to 2–3 of:
+Six rows in the OSC receiver. Every row carries the address **`/coral/bed`** —
+the same address six times, each with its own Map target.
 
-| Target | Range as intensity 0 → 1 | Effect |
-|---|---|---|
-| Low-pass **filter cutoff** on `NATURAL` | open → closed | the reef bed goes muffled, "sick" |
-| **Drone / noise level** on `INDUSTRIAL` | silent → present | the industrial layer swells in |
-| **Reverb decay** (send/return) | tight → long, washed-out | space grows cold and cavernous |
-| **Pitch / detune** on a natural pad | in-tune → detuned | subtle wrongness |
+| Row | In min | In max | Map to | Min | Max |
+|---|---|---|---|---|---|
+| 1 | `0` | `1` | **Natural** → Speaker On | `100 %` | `0 %` |
+| 2 | `0` | `1` | **Fluorescent** → Speaker On | `0 %` | `100 %` |
+| 3 | `1` | `2` | **Fluorescent** → Track Volume | `85 %` | `0 %` |
+| 4 | `1` | `2` | **Bleached** → Speaker On | `0 %` | `100 %` |
+| 5 | `2` | `3` | **Bleached** → Track Volume | `85 %` | `0 %` |
+| 6 | `2` | `3` | **Recovery** → Speaker On | `0 %` | `100 %` |
 
-Keep it to two or three. Each is one OSC slot with a **Map** and a **Min/Max**.
-Because they all ride the same `intensity`, they move together and reverse together
-— the piece stays coherent for free.
+Map the **group** fader, not its children. `85 %` is where Live's volume fader
+sits at 0 dB — use your own mixed level if the groups aren't at unity.
+
+Which state ends up audible:
+
+| bed | Natural | Fluorescent | Bleached | Recovery |
+|---|---|---|---|---|
+| 0 Natural | **on** | off | off | off |
+| 1 Fluorescent | off | **on, 0 dB** | off | off |
+| 2 Bleached | off | on, −inf | **on, 0 dB** | off |
+| 3 Recovery | off | on, −inf | on, −inf | **on** |
+
+Natural and Recovery need one row each because they sit at the ends of the range,
+where a single row's clamping already gives a step. Fluorescent and Bleached sit
+in the middle, and one row can only push a parameter in one direction — so the
+**Speaker On** row switches each of them on at the bottom of its band and the
+**Track Volume** row switches it off at the top. Both must be true to hear it.
+
+Three things that bite:
+
+- **Set `In min` / `In max` before mapping.** Leaving the default `0.00–1.00` on a
+  `bed` row clamps states 1, 2 and 3 into one value and nothing past Fluorescent
+  ever fires.
+- **Smoothing off on the `Speaker On` rows.** Smoothing a binary parameter makes
+  it flicker through intermediate values on every change. ~30 ms on the Track
+  Volume rows is good — it turns each step into a short fade and stops the click.
+- **The Parameter field shows the parameter name, not the track.** To find out
+  which group a row actually grabbed, set its Min *and* Max both to `0 %` and see
+  which group goes silent. Rows 1, 2, 4 and 6 must land on four *different* groups.
+
+Send all four groups to one reverb return. The return keeps ringing through a
+switch, so the outgoing bed's tail carries across the cut instead of it sounding
+like an edit. This matters more than anything else for making a hard swap feel
+intentional.
 
 ---
 
-## Step 6 (optional) — A discrete event at the bleach latch
+## Step 5 — Map `/coral/intensity` for continuous colour
 
-`/coral/intensity` is continuous and reversible until it isn't. The **latch** — the
-irreversible moment bleaching sets in — is carried by `/coral/state` crossing to
-**2**. Marking it with a one-shot (a low sub hit, a sample stab, a sudden filter
-slam, or muting the natural group) gives the arc its dramatic beat.
+The bed switch is a step; `intensity` is what makes the piece move *between*
+switches. Note where the range actually lives:
 
-Approach: map / read `/coral/state` from the OSC receiver, and trigger when the
-value equals **2**. Depending on your comfort level:
+- state 0 spans only intensity `0.0 – 0.1` (26.0 → 26.2 °C)
+- state 1 carries `0.1 – 0.95` across the whole ~80 s warm-up
+- state 3 walks `1.0 → 0.0` down the 45 s recovery ramp
 
-- **Simplest:** map `/coral/state` to a parameter whose jump to 2 is audible (e.g.
-  a mute or a clip launch you've MIDI-mapped).
-- **Cleaner:** a small Max patch that fires a bang on the 0→…→2 transition and
-  launches a specific clip/scene once.
+So **Natural and Bleached are essentially static beds; Fluorescent and Recovery
+are the two that need modulation.** One or two parameters each is plenty — a
+filter cutoff and a reverb send. Use the row's `In min` / `In max` to window the
+useful part of the range (e.g. `0.15 → 0.95`) rather than mapping the full sweep.
 
-This is explicitly optional (per [BUILD_ORDER.md](BUILD_ORDER.md)); ship the
-continuous version first.
+---
+
+## Step 6 — `/coral/latch`: the riser that arrives *before* the bleach
+
+Bleaching requires 10 s of sustained heat before it latches. For those 10 s the
+outcome is already decided and merely unspent — and the server publishes that as
+`/coral/latch`, ramping `0.0 → 1.0` across the hold.
+
+That is the cue for a noise sweep, a riser, a swell: map `/coral/latch` to its
+level or filter and the sweep starts exactly when the threat begins and resolves
+exactly as the coral bleaches. If the visitor cools off mid-hold, the ramp
+retreats to 0.0 and the sweep backs down — the piece un-promises the bleach,
+which is the reversibility argument made audible.
+
+It pins at `1.0` once latched and stays there through states 2 and 3. With
+quantisation on, that means the riser *sustains* through the wait for the bar
+line and cuts when the bleached bed finally lands. Put the sweep on a track that
+survives the switch (outside the four groups, or fed to the reverb return) if you
+want it to ring out rather than stop dead.
+
+---
+
+## Step 7 — Bar-locked switching
+
+Switches driven straight off `/coral/state` land wherever the packet happens to
+arrive, usually mid-bar. `/coral/bed` is the same value held back to the next
+musical boundary, so the cut lands on bar 1 or bar 9 of the loop.
+
+Live is the clock master; the server only listens.
+
+1. **Audio MIDI Setup** → *Window ▸ Show MIDI Studio* → double-click **IAC Driver**
+   → tick **Device is online**. One bus is enough.
+2. **Live ▸ Settings ▸ Link/Tempo/MIDI** → find the IAC Driver *Output* row →
+   turn **Sync** on.
+3. In `config.yaml` set `quantize.enabled: true`. Check `midi_clock_port` matches
+   part of the bus name (default `"IAC"`).
+4. `pip install -r requirements.txt` (adds `python-rtmidi`).
+5. Restart the server. It logs `QUANTIZE listening for MIDI clock on '…'` when the
+   port is open, and `BED -> n` on every quantised switch.
+
+**Live's transport must be running** — MIDI clock only flows while it plays. In
+Arrangement, keep the loop brace on and let it run.
+
+### Choosing the window
+
+`quantize_bars: 8` on a 16-bar loop puts the cut on bar 1 or bar 9. The cost is
+the wait: **worst case is half your loop length, average a quarter.** At 120 BPM
+8 bars is 16 s. If that feels dead in rehearsal, drop to `4` — it is a config
+change, not a code change. The `/coral/latch` riser is what covers the wait
+before a bleach; nothing covers it on the other transitions, which is the honest
+argument for 4 over 8.
+
+`lead_ms` fires the switch slightly early to absorb the server tick, OSC transit
+and Live's own parameter latency. Start at `0`; if the cut feels consistently
+late, try `40`.
+
+### If it doesn't quantise
+
+The failure mode is silent by design — no clock means `/coral/bed` publishes
+immediately, which is exactly the behaviour you had before. Check the server log
+at startup:
+
+| Log line | Meaning |
+|---|---|
+| `QUANTIZE listening for MIDI clock on …` | Port open. If it still doesn't quantise, Live's **Sync** isn't on or the transport is stopped. |
+| `QUANTIZE no MIDI input matching 'IAC' (available: …)` | The IAC bus is offline. Step 1. |
+| `QUANTIZE python-rtmidi not installed` | Step 4. |
+| nothing at all | `quantize.enabled` is still `false`. |
+
+This is the one place anything talks *back* to the server, which CLAUDE.md
+otherwise forbids. What crosses the boundary is a clock and never state — Live
+cannot influence *what* the server publishes, only *when* the bed value moves —
+and with no clock the system is byte-identical to before. Ableton is still never
+a dependency.
 
 ---
 
@@ -248,11 +329,17 @@ With server + fake rig running and Ableton mapped:
 1. **Warm slowly.** The natural bed degrades continuously; industrial bleeds in.
 2. **Cool before the latch.** It reverses smoothly — state 1 is reversible; state 2
    never occurs.
-3. **Warm and hold at 28 °C.** After the sustained hold the bleach latches — the
-   one-shot fires (if mapped) and the soundscape pins to industrial/stillness.
-4. **Cool.** It stays bleached through the recovery lag, then heals gradually back
-   toward the natural bed and state 0.
+3. **Warm and hold at 28 °C.** The riser builds across the 10 s hold, the bleach
+   latches, and the bleached bed lands on the next bar line.
+4. **Cool.** It stays bleached through the recovery lag, then the recovery bed
+   takes over and heals back toward Natural.
 5. **Walk away 3 minutes.** The idle reset returns everything to Natural.
+
+On (5), the walk-away path plays the Recovery bed too. The idle reset presses the
+cool button and leaves the latch alone, so an unattended bleach heals 2 → 3 → 0
+exactly like a deliberate cool press — just starting 180 s later. There is no
+path from Bleached back to Fluorescent; once bleached, the only way out is
+through Recovery.
 
 **Record this run** (audio + the `osc_monitor`/rig terminal, or a screen capture).
 It is the first demonstrable proof of the concept and primary thesis documentation.

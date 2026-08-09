@@ -68,8 +68,12 @@ def render(status: dict, hz: float, count: int) -> str:
     filled = int(round(intensity * 20))
     bar = "#" * filled + "-" * (20 - filled)
     name = STATE_NAMES.get(status["state"], "?")
-    return (f"\rT={status['temp']:6.2f}C  state={status['state']}:{name:<11s}  "
-            f"intensity[{bar}] {intensity:4.2f}  {hz:4.1f}Hz  n={count}")
+    # bed lags state while quantisation holds a change back for the bar line; showing
+    # both is what makes that lag visible rather than looking like a dropped packet.
+    bed = "" if status["bed"] == status["state"] else f" bed={status['bed']}"
+    latch = f"  latch={status['latch']:4.2f}" if status["latch"] > 0.0 else ""
+    return (f"\rT={status['temp']:6.2f}C  state={status['state']}:{name:<11s}{bed}  "
+            f"intensity[{bar}] {intensity:4.2f}{latch}  {hz:4.1f}Hz  n={count}")
 
 
 def run(port: int) -> None:
@@ -87,7 +91,7 @@ def run(port: int) -> None:
     print(f"osc_monitor listening on 0.0.0.0:{port}  (Ctrl-C to quit)")
     print("  waiting for the server's fan-out — start src/server.py + a rig to drive it\n")
 
-    status = {"temp": float("nan"), "state": 0, "intensity": 0.0}
+    status = {"temp": float("nan"), "state": 0, "intensity": 0.0, "bed": 0, "latch": 0.0}
     count = 0
     # Effective rate over a sliding window, to confirm the 5 Hz broadcast is arriving.
     window: list[float] = []
@@ -122,6 +126,10 @@ def run(port: int) -> None:
                     status["state"] = int(msg.params[0])
                 elif msg.address == "/coral/intensity" and msg.params:
                     status["intensity"] = float(msg.params[0])
+                elif msg.address == "/coral/bed" and msg.params:
+                    status["bed"] = int(msg.params[0])
+                elif msg.address == "/coral/latch" and msg.params:
+                    status["latch"] = float(msg.params[0])
             count += 1
             if not seen_any:
                 seen_any = True
