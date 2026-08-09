@@ -83,6 +83,13 @@ namespace Coral
         bool _latchPending;      // one-shot requested, waiting for a safe seek
         float _latchFiredAt;
 
+        /// <summary>
+        /// How long after firing the one-shot before its reported length/time can
+        /// be trusted. Covers Unity's decoder settling after the rewind; well under
+        /// the clip's own length, so a genuinely dead clip still fails soft.
+        /// </summary>
+        const float LatchSettleS = 0.5f;
+
         Mode _mode = Mode.Continuous;
         int _lastState = 0;
 
@@ -318,14 +325,25 @@ namespace Coral
         {
             int i = (int)Layer.Latch;
             var vp = _players[i];
-            if (_dead[i] || vp == null || !vp.isPrepared) return true;
+            if (_dead[i] || vp == null) return true;
 
+            // TryFirePending calls Play() earlier in this same Update, and Unity
+            // does not report a usable clip state that fast: length still reads 0
+            // and isPrepared can drop while the decoder re-buffers after the
+            // rewind. The fall-through-to-true below would then hand over on the
+            // very first frame, so the rupture never appears on screen -- observed
+            // as "latch clip fired" and "latch clip -> bleached" logged in the same
+            // millisecond. Give the player a moment before trusting what it says.
+            float since = Time.time - _latchFiredAt;
+            if (since < LatchSettleS) return false;
+
+            if (!vp.isPrepared) return true;
             double len = vp.length;
             if (len <= 0d) return true;
             if (vp.time >= len - _cfg.crossfade_s) return true;
 
             // Backstop for a stalled decode: never hold a still frame forever.
-            return Time.time - _latchFiredAt > len * 2d + 5d;
+            return since > len * 2d + 5d;
         }
 
         // ----------------------------------------------------------- compositing

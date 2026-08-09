@@ -22,17 +22,20 @@ namespace Coral
     [Serializable]
     public class ClipPaths
     {
-        public string healthy = "coral-healthy.mp4";
-        public string fluorescent = "coral-fluorescent.mp4";
-        public string bleached = "coral-bleached.mp4";
-        public string latch = "coral-fluorescent-to-bleached.mp4";
+        public string healthy = "coral-healthy.mov";
+        public string fluorescent = "coral-fluorescent.mov";
+        public string bleached = "coral-bleached.mov";
+        public string latch = "coral-fluorescent-to-bleached.mov";
     }
 
     [Serializable]
     public class ProjectionConfig
     {
         public int osc_port = 9020;
-        public string video_dir = "";
+        // "video" matches the portable bundle layout (.app + config + video/), so
+        // the built-in defaults resolve to real clips when a config is missing or
+        // corrupt rather than to a black screen.
+        public string video_dir = "video";
         public ClipPaths clips = new ClipPaths();
         public float crossfade_s = 1.5f;
 
@@ -92,9 +95,14 @@ namespace Coral
             }
             catch (Exception e)
             {
-                // Malformed JSON must not stop the installation from booting.
+                // Malformed JSON must not stop the installation from booting. Keep
+                // SourceDir even so: without it the default clip names resolve to
+                // bare filenames against the process working directory, which never
+                // matches, so every layer fails to open and the fallback can only
+                // ever show black. With it, a corrupt config still finds the clips
+                // sitting beside it and the piece runs on defaults.
                 Debug.LogError($"[config] failed to parse {path} ({e.Message}) — using defaults");
-                return new ProjectionConfig();
+                return new ProjectionConfig { SourceDir = Path.GetDirectoryName(path) };
             }
         }
 

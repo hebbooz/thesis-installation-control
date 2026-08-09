@@ -65,8 +65,14 @@ def duration(path: Path) -> float:
 def fps(path: Path) -> float:
     r = run(["ffprobe", "-v", "error", "-select_streams", "v:0",
              "-show_entries", "stream=r_frame_rate", "-of", "csv=p=0", str(path)])
+    # csv=p=0 sometimes appends an empty trailing field, so the line reads
+    # "30/1," rather than "30/1" — seen on remuxed ProRes masters. Parsing the
+    # whole line then does float("1,") -> ValueError -> 0.0, and measure() bails
+    # on rate <= 0 before grabbing a single frame, reporting "could not measure"
+    # on a clip that is completely fine. Take the first field only.
+    field = r.stdout.strip().split(",")[0]
     try:
-        num, _, den = r.stdout.strip().partition("/")
+        num, _, den = field.partition("/")
         return float(num) / float(den or 1)
     except (ValueError, ZeroDivisionError):
         return 0.0

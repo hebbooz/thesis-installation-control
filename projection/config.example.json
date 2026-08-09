@@ -3,16 +3,17 @@
 
   "osc_port": 9020,
 
-  "video_dir": "",
-  "_video_dir_note": "Absolute path to the folder holding the exported clips. Leave \"\" to resolve clips relative to this config file's own directory.",
+  "video_dir": "video",
+  "_video_dir_note": "Resolved against THIS FILE's directory, not the process working directory. \"video\" gives the portable layout — CoralProjection.app, coral-projection.json and video/ side by side — so the whole bundle works wherever it is copied, including onto the cold-restore USB. An absolute path also works for bench use, but breaks portability.",
 
   "clips": {
-    "healthy": "coral-healthy.mp4",
-    "fluorescent": "coral-fluorescent.mp4",
-    "bleached": "coral-bleached.mp4",
-    "latch": "coral-fluorescent-to-bleached.mp4"
+    "healthy": "coral-healthy.mov",
+    "fluorescent": "coral-fluorescent.mov",
+    "bleached": "coral-bleached.mov",
+    "latch": "coral-fluorescent-to-bleached.mov"
   },
-  "_clips_note": "Three loops plus one one-shot. healthy/fluorescent/bleached loop forever and their lengths do not affect behaviour (60s recommended). latch plays once on the 1->2 bleach latch and is 20s. Its bound is crossfade_s < length < recovery_lag_s (1.5s < 20s < 30s): state 2 cannot be shorter than recovery_lag_s, so a clip under that can never be cut short mid-telling. WITH A 20s CLIP THE MARGIN IS 10s — do not lower recovery_lag_s below ~25s without shortening this clip. There are no directional transition clips; every other change is an opacity blend driven by intensity.",
+  "_clips_note": "ProRes 422, 2560x800, 30fps, bt709-tagged. Three loops plus one one-shot. healthy/fluorescent/bleached loop forever and their lengths do not affect behaviour — longer just means a rarer wrap. Push healthy longest: it is the idle state, on screen between visitors and therefore most of the exhibition. bleached wants length too, since an abandoned bleach holds at full opacity for ~3 minutes (idle_timeout_s 180 + recovery_lag_s 30). fluorescent can be shortest — state 1 is a blend, so its wrap is half-masked by the healthy layer. latch plays once on the 1->2 bleach latch; its bound is crossfade_s < length < recovery_lag_s (1.5s < 21s < 30s), because state 2 can never be shorter than recovery_lag_s, so a clip under that can never be cut short mid-telling. Do not lower recovery_lag_s below ~25s without shortening the latch clip. There are no directional transition clips; every other change is an opacity blend driven by intensity.",
+  "_loop_note": "The three hold clips MUST have closed loop points — their tail cross-dissolved onto their head — or they visibly jump at every wrap, forever, in a quiet gallery. Cutting them straight out of a continuous master does NOT close them. tools/loop_seam.py does it and measures the wrap discontinuity before and after, so the fix is verified rather than assumed. The clip comes back one overlap shorter than it went in.",
 
   "crossfade_s": 1.5,
   "_crossfade_note": "One fade rate for everything. Also acts as the slew limit on the state 0/1 intensity blend, and as the lead-in used to hand a one-shot over before its last frame (so the clip never freezes while fading).",
