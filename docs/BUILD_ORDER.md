@@ -66,7 +66,7 @@ Drive the fake rig through a full arc and *hear* the soundscape degrade continuo
 *Requires: router, plugs.*
 
 **Build:**
-1. Configure the GL.iNet Opal: **separate SSIDs** for 2.4 GHz and 5 GHz. DHCP reservations by MAC.
+1. Configure the Archer C50: LAN moved to `192.168.50.1`, **separate SSIDs** for 2.4 GHz and 5 GHz (Smart Connect off), 2.4 GHz on WPA2-AES / 20 MHz / fixed channel, DHCP reservations by MAC. See `docs/HARDWARE.md`.
 2. Join the plugs to the 2.4 GHz SSID; note their IPs; record in config.
 3. Implement `src/actuation.py` — Tasmota HTTP on/off with timeouts and soft failure.
 4. Wire the Mac to the router by Ethernet.

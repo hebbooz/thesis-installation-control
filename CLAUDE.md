@@ -51,7 +51,8 @@ Research context: the piece addresses "psychic numbing" around climate crisis by
 │   ├── ARCHITECTURE.md        # full system design
 │   ├── PROTOCOL.md            # OSC + HTTP message contracts
 │   ├── HARDWARE.md            # devices, wiring, firmware setup
-│   └── BUILD_ORDER.md         # phased build with acceptance tests
+│   ├── BUILD_ORDER.md         # phased build with acceptance tests
+│   └── SETUP_LOG.md           # dated record of what was actually built, and the quirks hit
 └── logs/                      # gitignored
 ```
 
@@ -96,7 +97,7 @@ Full detail in `docs/PROTOCOL.md`. Ports live in config.
 - **Heater:** 100 W thermostatic aquarium heater, ~9 cm, dial set slightly above 28 °C (dial slop means set ~28.5 to reliably cross the 27.8 latch threshold).
 - **Cooling:** clip-on aquarium fan on a second plug. Passive drift when heater is off.
 - **Buttons:** arcade buttons + USB "zero delay" encoder. **IMPORTANT:** this enumerates as a USB **gamepad/joystick**, NOT a keyboard. Read it with `pygame` or `hid`, not a keyboard listener.
-- **Network:** GL.iNet Opal (GL-SFT1200). Give 2.4 GHz and 5 GHz **separate SSIDs** — ESP devices can fail to join combined-band SSIDs. Plugs and sensor on 2.4 GHz; phones on 5 GHz; Mac wired.
+- **Network:** TP-Link Archer C50 AC1200 (mains-powered, 4× 10/100 LAN). Give 2.4 GHz and 5 GHz **separate SSIDs** — ESP devices can fail to join combined-band SSIDs. Plugs and sensor on 2.4 GHz; phones on 5 GHz; Mac wired. LAN is `192.168.50.0/24` (changed from the router's 192.168.0.1 default so it can't collide with venue Wi-Fi on a dual-homed Mac).
 
 ## Simulated vs real temperature
 

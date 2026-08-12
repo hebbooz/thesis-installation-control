@@ -21,7 +21,7 @@ temperature:
   # reading and never stalls the 5 Hz loop.
   real:
     ingestion: http         # HTTP poll is the only supported mode (CLAUDE.md: no MQTT broker)
-    sensor_url: "http://192.168.8.30/sensor/water_temperature"
+    sensor_url: "http://192.168.50.30/sensor/water_temperature"
     poll_hz: 2              # ESPHome sends ~1–2 Hz; no benefit polling faster
     timeout_s: 2.0          # per-poll HTTP timeout
     start_temp: 26.0        # reported until the first poll lands (system boots at state 0)
@@ -95,9 +95,9 @@ quantize:
 plugs:
   enabled: false            # set true when mode: real
   timeout_s: 2.0
-  heater: "http://192.168.8.21"
-  fan:    "http://192.168.8.22"
-  lamp:   "http://192.168.8.23"
+  heater: "http://192.168.50.21"
+  fan:    "http://192.168.50.22"
+  lamp:   "http://192.168.50.23"
 
   # Lamp behaviour: "on_until_bleach" switches the lamp off at the bleach latch
   # (a dramatic beat), "always_on" leaves it alone, "off" disables lamp control.

@@ -190,13 +190,15 @@ Fixed devices get DHCP reservations by MAC on the router; AR phones use the dyna
 
 | Host | Example IP |
 |---|---|
-| Router / gateway | 192.168.8.1 |
-| MacBook (server) | 192.168.8.10 (wired) |
-| Heater plug | 192.168.8.21 |
-| Fan plug | 192.168.8.22 |
-| Lamp plug | 192.168.8.23 |
-| Temperature sensor | 192.168.8.30 |
-| Display device | 192.168.8.40 |
+| Router / gateway | 192.168.50.1 |
+| MacBook (server) | 192.168.50.10 (wired) |
+| Heater plug | 192.168.50.21 |
+| Fan plug | 192.168.50.22 |
+| Lamp plug | 192.168.50.23 |
+| Temperature sensor | 192.168.50.30 |
+| Display device | 192.168.50.40 |
 | AR phones | DHCP pool |
 
-Adjust to the Opal's actual subnet; these are config values, not commitments.
+The Archer C50 ships on `192.168.0.1`; `docs/HARDWARE.md` moves it to `192.168.50.1` so a dual-homed Mac
+can't hit a subnet collision. These are config values, not commitments — if you keep another subnet, change
+`config.yaml` to match.

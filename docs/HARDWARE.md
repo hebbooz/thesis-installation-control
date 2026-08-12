@@ -17,7 +17,7 @@ Devices, wiring, firmware and network setup. Nothing here requires soldering.
 | Heater | 100 W thermostatic aquarium heater, ~9 cm | Self-regulating; dial ≈28.5 °C |
 | Cooling | Clip-on aquarium fan (USB) | Needs a USB brick; brick plugs into the fan's smart plug |
 | Buttons | Arcade buttons + USB "zero delay" encoder | Enumerates as a **gamepad**, not a keyboard |
-| Router | GL.iNet Opal (GL-SFT1200) | Private LAN, DHCP reservations |
+| Router | TP-Link Archer C50 AC1200 | Private LAN, DHCP reservations. Mains-powered (9 V DC brick), 4× 10/100 LAN |
 | Display | Spare phone/tablet | Shows the server's web page |
 | Lamp | Any lamp, switch left permanently on | On/off via smart plug |
 
@@ -25,13 +25,57 @@ Devices, wiring, firmware and network setup. Nothing here requires soldering.
 
 ## Network setup
 
-1. **Separate the SSIDs.** In the Opal's admin panel, give the 2.4 GHz and 5 GHz networks *different names* (e.g. `coral-24` and `coral-5`). ESP-class devices frequently fail to join combined-band SSIDs — this eliminates an entire category of frustrating problems.
-2. **Band allocation:**
+The router is a **TP-Link Archer C50 AC1200, hardware v3** — the older green admin UI with a left-hand menu
+tree (v5 uses a different blue Basic/Advanced UI; menu paths below are the v3 ones). Admin panel:
+`http://192.168.0.1` or `http://tplinkwifi.net`, login `admin`/`admin`. Nothing below needs a WAN cable — the
+router serves DHCP on the LAN whether or not its WAN port is connected. If the Quick Setup wizard insists on
+an internet type, choose Dynamic IP and click through its "no internet" complaint.
+
+1. **Move the LAN off `192.168.0.x`.** *Network → LAN*: set the router IP to `192.168.50.1`, save, reboot,
+   then browse to `http://192.168.50.1`. Everything in these docs uses `192.168.50.x`.
+   The reason is collision: `192.168.0.x` is one of the two most common home/venue subnets, and the Mac is
+   often wired to this LAN *and* on university Wi-Fi at the same time. Two interfaces on the same subnet fail
+   silently and confusingly. One field here removes the whole class of problem.
+2. **Set the DHCP pool** to `192.168.50.100`–`192.168.50.199` in *DHCP → DHCP Settings*, so the reserved
+   addresses below (`.10`–`.40`) sit outside the pool.
+3. **Separate the SSIDs.** v3 configures each radio in its own menu — *Wireless 2.4GHz → Wireless Settings*
+   and *Wireless 5GHz → Wireless Settings* — so there is no band-steering/Smart Connect toggle to disable.
+   Give them *different names* (e.g. `coral-24` and `coral-5`). ESP-class devices frequently fail to join
+   combined-band SSIDs; this eliminates an entire category of frustrating problems.
+4. **Make the 2.4 GHz radio ESP-friendly.** On that band set security to **WPA2-PSK (AES)** — not WPA/WPA2
+   mixed — channel width **20 MHz**, and a fixed channel (1, 6 or 11) rather than Auto. The plugs and the
+   sensor are 802.11 b/g/n 2.4 GHz single-band devices and are much happier with all three.
+5. **Band allocation:**
    - 2.4 GHz — smart plugs, temperature sensor (their radios are 2.4 GHz only)
    - 5 GHz — AR phones, display device
    - Wired — MacBook (stable producer address, keeps 5 GHz clear)
-3. **DHCP reservations by MAC** for the plugs, sensor and Mac. Leave AR phones on the dynamic pool; they self-register at the application layer.
-4. **No internet required.** The LAN is self-contained. Do not rely on a WAN connection at runtime.
+6. **DHCP reservations by MAC** — *DHCP → Address Reservation → Add New* — for the plugs, sensor and Mac.
+   **Enter the MAC with colons** (`BC:D0:74:F2:13:44`). This firmware rejects the dash form the TP-Link manual
+   documents with "Invalid MAC Address format", on desktop and mobile alike.
+   **Reservations only bind after a router reboot** (*System Tools → Reboot*) — renewing the client's DHCP
+   lease is not enough, it will just take another pool address. So add every reservation first and reboot
+   once at the end, rather than rebooting per device.
+   Read each MAC from *DHCP → DHCP Client List* rather than from the device:
+   that is the address the router actually sees, which is what the reservation must match. Reboot each
+   appliance afterwards so it picks up its reserved address. Leave AR phones on the dynamic pool; they
+   self-register at the application layer.
+
+   **macOS randomises its Wi-Fi MAC per network.** Before reserving the Mac's wireless address, join
+   `coral-5`, then *System Settings → Wi-Fi → Details… → Private Wi-Fi Address: **Off***. Left on the default
+   (*Fixed*), the address is still stable but has been known to change across macOS upgrades — and a
+   reservation that quietly stops matching is a bad thing to discover at a venue. Ethernet adapters are not
+   randomised.
+7. **Leave the guest network off.** Guest Wi-Fi isolates clients from the LAN, which would block exactly the
+   device-to-device traffic this system depends on.
+8. **No internet required.** The LAN is self-contained. Do not rely on a WAN connection at runtime. If you do
+   want internet on it during development, patch the venue's Ethernet into the C50's **WAN** port — never put
+   the installation directly on venue Wi-Fi.
+
+The MacBook has no Ethernet port; the wired link needs a USB-C/Thunderbolt Ethernet adapter. Until it exists,
+the Mac can sit on `coral-5` with its Wi-Fi MAC reserved to `192.168.50.11` — everything works, but retest
+wired before the exhibition, and never leave the Mac on Wi-Fi *and* Ethernet on this LAN at once.
+
+The 10/100 Mbps LAN ports are not a limitation here: the whole control plane is three OSC floats at 5 Hz.
 
 ---
 
@@ -144,6 +188,8 @@ In *System Settings → Displays*, set **extend** (not mirror) and arrange side 
 | Constraint | Consequence |
 |---|---|
 | Plugs and sensor are 2.4 GHz only | Separate SSIDs; don't put them on the 5 GHz network |
+| macOS blocks local-network traffic per app | Grant **Privacy & Security → Local Network** to whatever launches the server (Terminal, VS Code, the Python binary). Without it, plug/sensor HTTP fails silently while the router and internet stay reachable — it looks exactly like router client isolation. Restart the app after granting |
+| Router is mains-powered (9 V brick), not USB | Needs its own outlet on the plinth power board; it reboots unattended after a power cut, so the LAN comes back on its own |
 | Heater dial has ±0.5–1 °C slop | Set dial ≈28.5 so water reliably crosses the 27.8 latch threshold |
 | Cooling is passive + fan only | Cool-down is slower than heat-up; measure and tune config timings to match |
 | Encoder is a gamepad | Read with `pygame.joystick`, never a keyboard listener |

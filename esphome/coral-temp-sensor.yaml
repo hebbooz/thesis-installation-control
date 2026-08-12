@@ -34,7 +34,7 @@ captive_portal:
 
 # Optional: uncomment to publish over MQTT instead of HTTP polling
 # mqtt:
-#   broker: 192.168.8.10
+#   broker: 192.168.50.10
 #   topic_prefix: coral
 
 dallas:

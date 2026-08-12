@@ -148,7 +148,7 @@ the piece to Natural.
 
 ## Running with real hardware
 
-1. Set up the private network (separate 2.4 GHz and 5 GHz SSIDs — see `docs/HARDWARE.md`).
+1. Set up the private network on the Archer C50 — LAN moved to `192.168.50.1`, separate 2.4 GHz and 5 GHz SSIDs (see `docs/HARDWARE.md`).
 2. Flash the temperature sensor with `esphome/coral-temp-sensor.yaml`.
 3. Note the reserved IPs of the sensor and plugs; put them in `config.yaml`.
 4. Set `temperature.mode: real` in `config.yaml`.

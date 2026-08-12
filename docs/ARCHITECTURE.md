@@ -40,7 +40,7 @@ The architecture is organised into five layers. Each layer depends only on the c
 | Layer | Responsibility | Elements |
 |---|---|---|
 | L1 — Physical / Device | Real-world sensing and actuation | Buttons + encoder, heater, smart plug, temp sensor, LED light, projectors, speakers, phones |
-| L2 — Network / Transport | Private LAN, addressing, transport protocols | Travel router, DHCP reservations, UDP + HTTP |
+| L2 — Network / Transport | Private LAN, addressing, transport protocols | Dedicated router, DHCP reservations, UDP + HTTP |
 | L3 — Messaging / Interface | Message contracts and endpoints | OSC event schema, HTTP actuation calls, hello/registry protocol |
 | L4 — Orchestration / Logic | State derivation, control loop, client management | Orchestration server (the one bespoke component) |
 | L5 — Experience / Presentation | Rendering the state to the visitor | AR app, projection player, Ableton set, WLED preset mapping |
@@ -57,7 +57,7 @@ Every L1/L2 element is a procured or held item:
 | Cooling fan + 2nd plug | [Proc A] | Defer |
 | WLED controller + LED strip + PSU | [Proc D] | Buy |
 | Coral tracking spotlight | [Proc D] | Buy |
-| Travel router + Ethernet | [Proc E] | Buy |
+| Dedicated router + Ethernet | [Proc E] | Held (TP-Link Archer C50 AC1200) |
 | AR devices (×3) | [Proc F] | Borrow first |
 | Epson EB-435W (×2) | [Proc G] | Held |
 | HDMI, USB-C→HDMI adapter | [Proc G] | Buy |
@@ -100,7 +100,7 @@ Consolidating server, video, and audio on one host is safe because the video is 
                                    │                                  │
                              [Epson EB-435W ×2]              [Powered speakers]
                                    │
-        ┌──────────────────────────┼───────────── Private LAN (travel router) ─────────────────────┐
+        ┌──────────────────────────┼───────────── Private LAN (Archer C50) ────────────────────────┐
         │                          │                        │                    │                 │
    [AR phone 1]  [AR phone 2]  [AR phone 3]          [WLED light]         [Smart plug]      [WiFi temp sensor]
    OSC in +hello  …             …                    OSC/HTTP in          HTTP in            HTTP/MQTT out
@@ -116,7 +116,7 @@ Consolidating server, video, and audio on one host is safe because the video is 
 ## 4. Network architecture (L2)
 
 ### 4.1 Private LAN
-A single dedicated dual-band travel router [Proc E] provides an isolated Layer-2/3 network. The public internet is not required at runtime and is not relied upon. University/venue Wi-Fi is explicitly excluded because client isolation on such networks blocks the device-to-device (peer) traffic this system depends on, and because captive-portal/registration flows prevent appliance onboarding.
+A single dedicated dual-band router [Proc E] — a TP-Link Archer C50 AC1200, mains-powered, 802.11ac 5 GHz + 802.11n 2.4 GHz, four 10/100 LAN ports — provides an isolated Layer-2/3 network. Its LAN is re-addressed from the factory `192.168.0.1` to `192.168.50.1` so the host can be dual-homed (wired here, Wi-Fi elsewhere) without a subnet collision. The public internet is not required at runtime and is not relied upon. University/venue Wi-Fi is explicitly excluded because client isolation on such networks blocks the device-to-device (peer) traffic this system depends on, and because captive-portal/registration flows prevent appliance onboarding.
 
 ### 4.2 Addressing plan
 Static addressing is achieved via **DHCP reservation by MAC** on the router (not hand-set static IPs on devices), so every device continues to use ordinary DHCP and remains portable to any network, while always receiving a known address here.
@@ -127,9 +127,10 @@ Static addressing is achieved via **DHCP reservation by MAC** on the router (not
 | MacBook Pro (host) | 192.168.50.10 | Wired (Ethernet) | OSC producer, HTTP client, HTTP server (display) |
 | WLED light | 192.168.50.20 | 2.4 GHz | OSC/HTTP consumer |
 | Smart plug (heater) | 192.168.50.21 | 2.4 GHz | HTTP server (actuation) |
-| WiFi temp sensor | 192.168.50.22 | 2.4 GHz | HTTP/MQTT producer |
-| Cooling plug (optional) | 192.168.50.23 | 2.4 GHz | HTTP server (actuation) |
-| Display phone/tablet | 192.168.50.30 | 2.4/5 GHz | HTTP client |
+| Smart plug (fan) | 192.168.50.22 | 2.4 GHz | HTTP server (actuation) |
+| Smart plug (lamp) | 192.168.50.23 | 2.4 GHz | HTTP server (actuation) |
+| WiFi temp sensor | 192.168.50.30 | 2.4 GHz | HTTP producer |
+| Display phone/tablet | 192.168.50.40 | 2.4/5 GHz | HTTP client |
 | AR phone 1–3 | DHCP pool (dynamic) | 5 GHz preferred | OSC consumer + hello producer |
 
 Design notes:
