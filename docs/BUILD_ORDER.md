@@ -36,10 +36,10 @@ Server side is already satisfied: Ableton is a static subscriber on UDP 9010, so
 **Build:**
 1. Add a free Max for Live **OSC-receiver device** (e.g. OSC Mapper, SM OSC Receiver v2) listening on UDP 9010. *(The old Connection Kit is discontinued; its OSC Monitor is display-only — see [ABLETON.md](ABLETON.md).)*
 2. Four bed groups — natural / fluorescent / bleached / recovery — **all playing continuously and in sync**. Nothing is ever launched; only audibility changes.
-3. Map `/coral/bed` → six rows selecting which bed is audible (Speaker On + Track Volume per group).
+3. Map `/coral/cue` → six rows selecting which bed is audible (Speaker On + Track Volume per group).
 4. Map `/coral/intensity` → 1–2 continuous parameters inside the fluorescent and recovery beds.
 5. Map `/coral/latch` → a riser, so the sound leads the bleach across the 10 s hold rather than chasing it.
-6. Optionally enable `quantize` so bed switches land on the bar (needs the IAC Driver + Live's Sync output).
+6. Enable `quantize` so switches land on the bar (needs the IAC Driver + Live's Sync output). This governs the lamp, the projection and the AR app as well as the beds — they all read `/coral/cue`, so it is what puts the whole room on one downbeat.
 
 **Verify the pipe first:** `python tools/osc_monitor.py` binds port 9010 and prints exactly what Ableton would receive, so any fault can be isolated to the server side or the Ableton side. Quit it before pointing Ableton at 9010 (one program per UDP port).
 

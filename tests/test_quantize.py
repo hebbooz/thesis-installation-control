@@ -1,4 +1,4 @@
-"""Bed quantiser tests — the musical boundary, and every path that must fail soft.
+"""Cue quantiser tests — the musical boundary, and every path that must fail soft.
 
 No MIDI hardware: a fake port hands the quantiser exactly the clock bytes Live
 would send, so the bar grid under test is the real one (24 pulses per beat).
@@ -7,7 +7,7 @@ import logging
 
 import pytest
 
-from quantize import CLOCK, SPP, START, BedQuantizer
+from quantize import CLOCK, SPP, START, CueQuantizer
 
 LOG = logging.getLogger("test")
 
@@ -32,7 +32,7 @@ def make(**overrides):
     """A quantiser wired to a fake port, bypassing MIDI discovery entirely."""
     cfg = {"enabled": True, "quantize_bars": 8, "beats_per_bar": 4, "stale_s": 1.0}
     cfg.update(overrides)
-    q = BedQuantizer(cfg, LOG)   # enabled but no real port matched
+    q = CueQuantizer(cfg, LOG)   # enabled but no real port matched
     port = FakePort()
     q._port = port
     return q, port
@@ -56,8 +56,8 @@ def test_change_is_held_until_the_boundary():
     # A third of the way through the window, the coral bleaches.
     port.pulses(250)
     q.update(0, now=1.0)
-    bed, moved = q.update(2, now=1.05)
-    assert (bed, moved) == (0, False), "bed jumped early"
+    cue, moved = q.update(2, now=1.05)
+    assert (cue, moved) == (0, False), "cue jumped early"
 
     # Still short of the line.
     port.pulses(500)
@@ -114,7 +114,7 @@ def test_song_position_reseats_the_count():
 
 def test_silent_clock_falls_back_to_immediate():
     """Live closed or transport stopped: quantisation must get out of the way
-    rather than freeze the soundscape on a stale bed."""
+    rather than freeze the soundscape on a stale cue."""
     q, port = make(stale_s=0.5)
     q.update(0, now=0.0)
     port.pulses(10)
@@ -125,7 +125,7 @@ def test_silent_clock_falls_back_to_immediate():
 
 
 def test_disabled_is_pure_passthrough():
-    q = BedQuantizer({"enabled": False}, LOG)
+    q = CueQuantizer({"enabled": False}, LOG)
     assert q.update(0, now=0.0) == (0, False)
     assert q.update(2, now=0.05) == (2, True)
     assert q.update(2, now=0.10) == (2, False)
@@ -134,7 +134,7 @@ def test_disabled_is_pure_passthrough():
 
 def test_missing_config_block_is_harmless():
     """A config predating this feature must still start the server."""
-    q = BedQuantizer({}, LOG)
+    q = CueQuantizer({}, LOG)
     assert q.update(1, now=0.0) == (1, False)
     q.close()
 

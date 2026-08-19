@@ -76,8 +76,12 @@ def render(status: dict, hz: float, count: int, stalled: bool) -> str:
     filled = int(round(intensity * 20))
     bar = "#" * filled + "-" * (20 - filled)
     name = STATE_NAMES.get(status["state"], "?")
+    # A real AR client switches its appearance on `cue`, not `state` — the two differ
+    # only while quantisation holds a change back for the bar line, so showing the cue
+    # when it lags is what makes that wait visible from a client's point of view.
+    cue = "" if status["cue"] == status["state"] else f" cue={status['cue']}"
     tail = "  (server silent)" if stalled else ""
-    return (f"\rT={status['temp']:6.2f}C  state={status['state']}:{name:<11s}  "
+    return (f"\rT={status['temp']:6.2f}C  state={status['state']}:{name:<11s}{cue}  "
             f"intensity[{bar}] {intensity:4.2f}  {hz:4.1f}Hz  n={count}{tail}")
 
 
@@ -115,7 +119,7 @@ def run(args: argparse.Namespace) -> None:
         except OSError:
             pass  # server may not be up yet — keep trying, it will answer once it is
 
-    status = {"temp": float("nan"), "state": 0, "intensity": 0.0}
+    status = {"temp": float("nan"), "state": 0, "intensity": 0.0, "cue": 0}
     count = 0
     window: list[float] = []          # packet arrival times, for the effective-rate readout
     connected = False                 # have we ever received a broadcast?
@@ -150,6 +154,8 @@ def run(args: argparse.Namespace) -> None:
                             status["state"] = int(msg.params[0])
                         elif msg.address == "/coral/intensity" and msg.params:
                             status["intensity"] = float(msg.params[0])
+                        elif msg.address == "/coral/cue" and msg.params:
+                            status["cue"] = int(msg.params[0])
                     count += 1
                     last_packet = now
                     if not connected:

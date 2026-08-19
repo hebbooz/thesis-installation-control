@@ -129,14 +129,14 @@ def test_broadcast_contract_and_registration(server):
     assert snaps, "no broadcasts received"
     last = snaps[-1]
     assert set(last) == {"/coral/state", "/coral/intensity", "/coral/temp",
-                         "/coral/bed", "/coral/latch"}
+                         "/coral/cue", "/coral/latch"}
     assert isinstance(last["/coral/state"], int)
     assert isinstance(last["/coral/intensity"], float)
     assert isinstance(last["/coral/temp"], float)
-    assert isinstance(last["/coral/bed"], int)
+    assert isinstance(last["/coral/cue"], int)
     assert isinstance(last["/coral/latch"], float)
     assert last["/coral/state"] == 0          # cold start
-    assert last["/coral/bed"] == 0            # quantise disabled -> bed tracks state
+    assert last["/coral/cue"] == 0            # quantise disabled -> cue tracks state
     assert last["/coral/latch"] == 0.0        # nothing pending
     assert 25.5 < last["/coral/temp"] < 26.5
     sock.close()

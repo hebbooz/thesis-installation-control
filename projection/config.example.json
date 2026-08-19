@@ -25,7 +25,9 @@
   "display_width": 2560,
   "display_height": 800,
   "fullscreen": true,
-  "_display_note": "Spanned canvas across both Epson EB-435W (1280x800 each). macOS Displays must be set to Extend, arranged side by side — that is an OS setting, not something this player controls.",
+  "displays": [0, 1],
+  "_display_note": "display_width/height is the WHOLE canvas across both projectors, not one window. macOS never joins two displays into one desktop — a fullscreen window always lands on exactly one screen — so the player composites the full canvas once and each entry in \"displays\" blits its own horizontal slice of it to its own projector. Two entries therefore means each projector gets 1280x800 of a 2560x800 image.",
+  "_displays_note": "Unity display indices, LEFT TO RIGHT. Index 0 is always whichever screen macOS calls the Main Display, so either drag the menu bar onto the left projector in System Settings > Displays, or read the display list the player logs at startup and put the right indices here (with the laptop lid open and not main, the projectors are usually [1, 2]). Displays must be set to Extend, not Mirror. An index that is not attached is skipped with a warning and, if none are left, the player falls back to one output showing the whole canvas — which is the windowed bench setup drive_projection.py is used against, so a laptop-only test needs no config change.",
 
   "fit": "cover",
   "pan_x": 0.0,

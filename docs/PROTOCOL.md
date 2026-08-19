@@ -15,18 +15,33 @@ Emitted as an OSC bundle at a fixed rate (default 5 Hz, configurable) to every s
 
 | Address | Type | Range | Meaning |
 |---|---|---|---|
-| `/coral/state` | int32 | 0–3 | Discrete phase — used to *switch* (which clip, which material set) |
+| `/coral/cue` | int32 | 0–3 | Discrete phase, bar-quantised — **what every output switches on** |
 | `/coral/intensity` | float32 | 0.0–1.0 | Continuous severity — used to *interpolate* (dim, cross-fade, colour) |
-| `/coral/temp` | float32 | °C | Live temperature, for display and reference |
-| `/coral/bed` | int32 | 0–3 | `state`, delayed to the next musical boundary. **Audio only.** |
 | `/coral/latch` | float32 | 0.0–1.0 | Progress toward the bleach latch — the one *forward-looking* value |
+| `/coral/state` | int32 | 0–3 | The same phase, immediate and unquantised. Truth, not presentation |
+| `/coral/temp` | float32 | °C | Live temperature, for display and reference |
 
-`/coral/bed` exists because the soundscape switches between 16-bar loops and a
-cut landing mid-bar reads as a glitch. It is identical to `/coral/state` unless
-`quantize.enabled` **and** MIDI clock is arriving, so a subscriber maps it
-unconditionally and never needs to know which mode the server is in. Only the
-audio subscriber should use it — delaying the projection or AR by up to half a
-loop would break the cross-modal simultaneity the piece depends on.
+`/coral/cue` is `state` held back to the next musical boundary. Every output that
+changes *discretely* follows it — which audio bed is audible, the lamp blackout,
+the projection's clip pair and latch rupture, the AR appearance — so they all
+change on the same downbeat instead of scattering across whichever 200 ms
+broadcast happened to carry the transition. The value rides the normal bundle, so
+all of them read it from one datagram and cannot drift apart from each other.
+
+It is identical to `/coral/state` unless `quantize.enabled` **and** MIDI clock is
+arriving, so a subscriber maps it unconditionally and never needs to know which
+mode the server is in.
+
+`/coral/state` remains the immediate, unquantised truth. It is what `intensity`
+and `latch` track, what the plug actuation and the logs use, and what a
+diagnostic readout should show. Use it to *know*; use `cue` to *switch*.
+
+> **This reverses an earlier decision.** `cue` began as `/coral/bed`, quantised
+> for the soundscape alone on the reasoning that delaying the projection or AR
+> would break cross-modal simultaneity. That had it backwards: quantising one
+> output is what breaks simultaneity, because the audio then lands up to half a
+> loop after everything else. Quantising all of them restores it — the wait is
+> shared, so the room turns as one gesture.
 
 `/coral/latch` is the only quantity that describes something that has not
 happened yet. Bleaching requires `latch_hold_s` of sustained heat, so during that
@@ -36,10 +51,17 @@ react to it. It retreats to 0.0 if the hold breaks, and pins at 1.0 for as long
 as the latch itself holds. It is **not** a substitute for `state`: reaching 1.0
 is what causes state 2, not what reports it.
 
+Deliberately **not** quantised, and why:
+
+| | Why it stays immediate |
+|---|---|
+| `intensity`, `latch` | Continuous drivers. Quantising them would step a crossfade at 0.5 Hz, and `latch` exists precisely to *precede* the bleach — it is what covers the wait for the bar line. |
+| Heater, fan | Gated off `target`, not `state` (§3). They sit *upstream* of the water temperature, not downstream of the state, so holding them back could not align anything downstream — the output-side hold is the only place simultaneity is produced. It would only make the button feel unresponsive. |
+
 ### Subscriber contract
 
 Subscribers **MUST**:
-- Treat `intensity` as the primary continuous driver and `state` as the discrete selector.
+- Treat `intensity` as the primary continuous driver and `cue` as the discrete selector.
 - Apply values idempotently — the same values arrive repeatedly by design.
 - Boot assuming state 0 / intensity 0.0 and converge silently on the first message received.
 - Tolerate missing messages; hold the last known value.
@@ -105,6 +127,12 @@ The server treats the temperature subsystem as **set-target → gate-power → o
 - Target cool (26.0) → heater plug **off**, fan plug **on**
 
 The server never assumes the heater's internal state — the heater has its own thermostat and self-regulates. The server only gates power and observes the sensor.
+
+Heater and fan follow `target` and are therefore **never quantised**: they are the
+actuators of the *input*, upstream of the water temperature, and a button press
+must reach them at once. The lamp is the exception — it follows `cue` (§1), because
+its blackout at the bleach is a shown event and belongs on the bar with the audio
+bed, the projection rupture and the AR appearance.
 
 Failures must be non-fatal: log the error, continue deriving state from the real sensor reading, retry on the next actuation change.
 

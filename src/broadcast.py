@@ -111,9 +111,9 @@ class Broadcaster:
         return extras, newly
 
     def emit(self, state: int, intensity: float, temp: float,
-             bed: int | None = None, latch: float = 0.0) -> None:
+             cue: int | None = None, latch: float = 0.0) -> None:
         """Send one bundle to every static subscriber and every registered client."""
-        dgram = _build_bundle(state, intensity, temp, bed, latch)
+        dgram = _build_bundle(state, intensity, temp, cue, latch)
         targets = [(host, port) for (host, port, _) in self.static]
         targets += self.registry.addresses()
         for target in targets:
@@ -127,12 +127,17 @@ class Broadcaster:
 
 
 def _build_bundle(state: int, intensity: float, temp: float,
-                  bed: int | None = None, latch: float = 0.0) -> bytes:
+                  cue: int | None = None, latch: float = 0.0) -> bytes:
     """Build the canonical OSC bundle (PROTOCOL.md §1).
 
-    ``bed`` is the bar-quantised twin of ``state`` used by the soundscape. It
+    ``cue`` is the bar-quantised twin of ``state``: the value every output that
+    *switches* follows, so the bed swap, the lamp blackout, the projection's clip
+    change and the AR appearance all land on the same musical boundary. It
     defaults to ``state``, so the address is always present and a subscriber can
     map it unconditionally whether or not quantisation is switched on.
+
+    ``state`` remains the immediate, unquantised truth — actuation and diagnostics
+    use it, and it is what continuous values (``intensity``, ``latch``) track.
 
     ``latch`` is progress toward the bleach latch — the one forward-looking value
     in the protocol.
@@ -141,7 +146,7 @@ def _build_bundle(state: int, intensity: float, temp: float,
     bundle.add_content(_message("/coral/state", int(state)))        # int32
     bundle.add_content(_message("/coral/intensity", float(intensity)))  # float32
     bundle.add_content(_message("/coral/temp", float(temp)))        # float32
-    bundle.add_content(_message("/coral/bed", int(state if bed is None else bed)))  # int32
+    bundle.add_content(_message("/coral/cue", int(state if cue is None else cue)))  # int32
     bundle.add_content(_message("/coral/latch", float(latch)))      # float32
     return bundle.build().dgram
 

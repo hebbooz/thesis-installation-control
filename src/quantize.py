@@ -1,9 +1,20 @@
-"""Musical quantisation of the bed cue (ABLETON.md).
+"""Musical quantisation of the switching cue (ABLETON.md).
 
-The soundscape switches between four 16-bar beds. Switching them the instant a
-state change lands drops the cut in the middle of a bar; this module holds the
-new value back and releases it only on a musical boundary, so the swap lands on
-bar 1 or bar 9 where it reads as intentional.
+Every output that *switches* discretely — which audio bed is audible, the lamp
+blackout, the projection's clip pair and latch rupture, the AR appearance — follows
+one bar-quantised value instead of the raw state, so they all change on the same
+musical boundary rather than scattering across whichever 200 ms broadcast happened
+to carry the transition. This module holds the new value back and releases it only
+on that boundary.
+
+Two things deliberately do **not** pass through here:
+
+* ``intensity`` and ``latch``, the continuous drivers. Quantising them would step
+  a crossfade at 0.5 Hz, and ``latch`` exists precisely to *precede* the bleach.
+* The heater and fan, which are gated off ``target`` (actuation.py) — they sit
+  *upstream* of the water temperature, not downstream of the state, so delaying
+  them could not align anything. The output-side hold below is the only place
+  simultaneity is produced.
 
 Live is the clock master. It sends MIDI clock out to a virtual (IAC) bus and the
 server counts those pulses — 24 per beat — so it always knows where the next bar
@@ -11,14 +22,14 @@ line is. Nothing is ever asked of Live; the server only listens.
 
 **This is a deliberate, contained deviation from CLAUDE.md's "outputs never talk
 back" rule.** What crosses the boundary is a clock, never state: Live cannot
-influence *what* the server publishes, only *when* the bed value moves. And it
-fails soft in the strongest sense — with no clock arriving (Live closed, transport
+influence *what* the server publishes, only *when* the cue moves. And it fails
+soft in the strongest sense — with no clock arriving (Live closed, transport
 stopped, IAC misconfigured) this degrades to publishing immediately, which is
 exactly the unquantised behaviour it replaces. The installation never depends on
 Live being alive.
 
-The published value rides the normal broadcast as ``/coral/bed``. When
-quantisation is disabled or the clock is silent, ``/coral/bed`` is identical to
+The published value rides the normal broadcast as ``/coral/cue``. When
+quantisation is disabled or the clock is silent, ``/coral/cue`` is identical to
 ``/coral/state``, so subscribers map it unconditionally and never care which mode
 the server is in.
 """
@@ -36,8 +47,8 @@ SPP = 0xF2        # song position pointer, in 16th notes -> reseat the count
 PULSES_PER_BEAT = 24
 
 
-class BedQuantizer:
-    """Holds the bed cue until the next musical boundary.
+class CueQuantizer:
+    """Holds the switching cue until the next musical boundary.
 
     Constructed from the ``quantize`` config block. Inert (pure pass-through) when
     disabled, when no MIDI port matches, or whenever the clock has gone silent —
@@ -57,7 +68,7 @@ class BedQuantizer:
         # Pulses between boundaries. 8 bars of 4/4 = 768.
         self.period = max(1, PULSES_PER_BEAT * self.beats_per_bar * self.quantize_bars)
 
-        self._bed: int | None = None    # last published value; None until cold start
+        self._cue: int | None = None    # last published value; None until cold start
         self._pulses = 0                # running clock count
         self._interval = 0.0            # measured seconds per pulse (for lead_ms)
         self._last_clock_t = 0.0        # monotonic time of the last tick that saw pulses
@@ -104,28 +115,29 @@ class BedQuantizer:
 
     # ------------------------------------------------------------------ runtime
     def update(self, state: int, now: float) -> tuple[int, bool]:
-        """Advance the clock and return ``(bed, changed_off_schedule)``.
+        """Advance the clock and return ``(cue, changed_off_schedule)``.
 
-        ``changed_off_schedule`` is True when the bed moved on a tick that is not a
+        ``changed_off_schedule`` is True when the cue moved on a tick that is not a
         broadcast tick, telling the server to emit immediately rather than wait up
-        to 200 ms for the next scheduled one.
+        to 200 ms for the next scheduled one. Every switching output reads the cue
+        from that one bundle, so they all turn on the same datagram.
         """
         crossed = self._drain(now)
         state = int(state)
 
-        if self._bed is None:            # cold start: publish whatever is true now
-            self._bed = state
+        if self._cue is None:            # cold start: publish whatever is true now
+            self._cue = state
             return state, False
 
         if not self._running(now):       # disabled, no port, or clock gone silent
-            changed = state != self._bed
-            self._bed = state
+            changed = state != self._cue
+            self._cue = state
             return state, changed
 
-        if crossed and state != self._bed:
-            self._bed = state
+        if crossed and state != self._cue:
+            self._cue = state
             return state, True
-        return self._bed, False
+        return self._cue, False
 
     def _running(self, now: float) -> bool:
         """True only while clock pulses are actually arriving."""

@@ -21,7 +21,7 @@ from actuation import PlugController
 from broadcast import Broadcaster
 from config import REPO_ROOT, load_config
 from inputs import ButtonReader
-from quantize import BedQuantizer
+from quantize import CueQuantizer
 from state import STATE_NAMES, CoralState
 from temperature import make_source
 
@@ -88,10 +88,11 @@ def main() -> None:
     # Physical arcade buttons (USB HID gamepad). Reports (False, False) when disabled
     # or no encoder is attached, so the OSC harness path below is always available.
     buttons = ButtonReader(cfg["input"], log)
-    # Bar-quantises the soundscape's bed cue against Live's MIDI clock. Pure
-    # pass-through when disabled or when no clock arrives, so it is safe to
-    # construct unconditionally and in every no-Ableton scenario.
-    quant = BedQuantizer(cfg.get("quantize", {}), log)
+    # Bar-quantises the switching cue against Live's MIDI clock, so every output
+    # that changes discretely does so on the same boundary. Pure pass-through when
+    # disabled or when no clock arrives, so it is safe to construct
+    # unconditionally and in every no-Ableton scenario.
+    quant = CueQuantizer(cfg.get("quantize", {}), log)
 
     broadcast_hz = float(cfg["broadcast"]["rate_hz"])
     dt = 1.0 / (broadcast_hz * SUBTICKS)
@@ -128,30 +129,36 @@ def main() -> None:
             for event in state.drain_events():
                 log.info(event)
 
-            # 3b. Gate the plugs. Edge-driven and enqueue-only, so this is cheap
-            # every tick and reacts to a button-driven target change immediately.
-            plugs.update(state.target, state.state)
+            # 3b. Switching cue: state held back to the next musical boundary when
+            # Live's clock is available, otherwise identical to state. Everything
+            # that changes *discretely* keys off this, so they change together.
+            cue, cue_moved = quant.update(state.state, now)
+            if cue_moved:
+                log.info("CUE -> %d (%s)", cue, STATE_NAMES[cue])
 
-            # 3c. Bed cue: state held back to the next musical boundary when Live's
-            # clock is available, otherwise identical to state.
-            bed, bed_moved = quant.update(state.state, now)
-            if bed_moved:
-                log.info("BED -> %d (%s)", bed, STATE_NAMES[bed])
+            # 3c. Gate the plugs. Edge-driven and enqueue-only, so this is cheap
+            # every tick. Heater and fan follow `target`, so a button press still
+            # reaches them immediately — they sit upstream of the water temperature
+            # and delaying them could not align anything downstream. Only the lamp
+            # reads this second argument, which is why it takes the cue: its
+            # blackout is a shown event and belongs on the bar with the others.
+            plugs.update(state.target, cue)
 
             # 4. Broadcast + prune at the configured rate (every SUBTICKS ticks).
-            # A bed change landing between broadcasts is emitted immediately: waiting
-            # up to 200 ms for the next scheduled one would drop the audio cut behind
-            # the bar line we just waited for.
+            # A cue change landing between broadcasts is emitted immediately: waiting
+            # up to 200 ms for the next scheduled one would drop every switching
+            # output behind the bar line we just waited for. One bundle carries the
+            # cue to all of them, so they cannot drift apart from each other.
             broadcast_tick = tick % SUBTICKS == 0
             if broadcast_tick:
                 for cid in bc.registry.prune(now):
                     log.info("CLIENT pruned (silent >%.0fs): %s", bc.registry.timeout_s, cid)
-            if broadcast_tick or bed_moved:
-                bc.emit(state.state, state.intensity, temp, bed, state.latch_progress)
+            if broadcast_tick or cue_moved:
+                bc.emit(state.state, state.intensity, temp, cue, state.latch_progress)
             if broadcast_tick and log_samples:
                 sample_log.info(
-                    "SAMPLE temp=%.3f target=%.1f state=%d intensity=%.3f bed=%d",
-                    temp, state.target, state.state, state.intensity, bed,
+                    "SAMPLE temp=%.3f target=%.1f state=%d intensity=%.3f cue=%d",
+                    temp, state.target, state.state, state.intensity, cue,
                 )
             tick += 1
 

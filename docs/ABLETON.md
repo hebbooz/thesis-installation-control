@@ -32,10 +32,10 @@ carries five messages (full spec in [PROTOCOL.md](PROTOCOL.md)):
 
 | Address | Type | Range | Use it to… |
 |---|---|---|---|
-| `/coral/bed` | int32 | `0 – 3` | **switch** — which of the four beds is audible. Bar-locked. |
+| `/coral/cue` | int32 | `0 – 3` | **switch** — which of the four beds is audible. Bar-locked. |
 | `/coral/intensity` | float32 | `0.0 – 1.0` | **interpolate** — continuous colour *within* a bed |
 | `/coral/latch` | float32 | `0.0 – 1.0` | **anticipate** — ramps across the 10 s hold *before* the bleach |
-| `/coral/state` | int32 | `0 – 3` | immediate, unquantised. Prefer `bed` for switching. |
+| `/coral/state` | int32 | `0 – 3` | immediate, unquantised. Prefer `cue` for switching. |
 | `/coral/temp` | float32 | °C | reference only; not usually mapped to sound |
 
 The narrative these values trace (from [BUILD_ORDER.md](BUILD_ORDER.md) and the
@@ -50,10 +50,14 @@ state machine in [../CLAUDE.md](../CLAUDE.md)):
 
 Two points that shape every mapping below:
 
-**`bed` switches, `intensity` shades.** The four beds are mutually exclusive and
-`bed` picks one; `intensity` moves things *inside* whichever bed is playing. Never
+**`cue` switches, `intensity` shades.** The four beds are mutually exclusive and
+`cue` picks one; `intensity` moves things *inside* whichever bed is playing. Never
 derive the bed from `intensity` — it is ambiguous. `1.0` is both state 2 and the
 first 30 s of state 3, and `0.5` is state 1 warming *and* state 3 healing.
+
+`cue` is not an audio-only address. The lamp, the projection and the AR app all
+switch on the same value, from the same datagram — so when the bed swaps, the room
+swaps with it.
 
 **`latch` is the only value that sees the future.** Everything else reports what
 is already true. `latch` reports what is about to be, which is what lets the
@@ -180,9 +184,9 @@ what the OSC receiver can drive.
 
 ---
 
-## Step 4 — Map `/coral/bed` to the four groups
+## Step 4 — Map `/coral/cue` to the four groups
 
-Six rows in the OSC receiver. Every row carries the address **`/coral/bed`** —
+Six rows in the OSC receiver. Every row carries the address **`/coral/cue`** —
 the same address six times, each with its own Map target.
 
 | Row | In min | In max | Map to | Min | Max |
@@ -215,7 +219,7 @@ in the middle, and one row can only push a parameter in one direction — so the
 Three things that bite:
 
 - **Set `In min` / `In max` before mapping.** Leaving the default `0.00–1.00` on a
-  `bed` row clamps states 1, 2 and 3 into one value and nothing past Fluorescent
+  `cue` row clamps states 1, 2 and 3 into one value and nothing past Fluorescent
   ever fires.
 - **Smoothing off on the `Speaker On` rows.** Smoothing a binary parameter makes
   it flicker through intermediate values on every change. ~30 ms on the Track
@@ -270,8 +274,14 @@ want it to ring out rather than stop dead.
 ## Step 7 — Bar-locked switching
 
 Switches driven straight off `/coral/state` land wherever the packet happens to
-arrive, usually mid-bar. `/coral/bed` is the same value held back to the next
+arrive, usually mid-bar. `/coral/cue` is the same value held back to the next
 musical boundary, so the cut lands on bar 1 or bar 9 of the loop.
+
+**This step is not only about the audio.** The lamp, the projection and the AR app
+read `cue` from the same bundle, so switching it on here puts the whole room on the
+bar: the bed swap, the blackout, the projection's rupture and the AR appearance all
+land on one downbeat. Turning it off returns every one of them to immediate,
+together. There is no setting in which some outputs are quantised and others aren't.
 
 Live is the clock master; the server only listens.
 
@@ -283,7 +293,7 @@ Live is the clock master; the server only listens.
    part of the bus name (default `"IAC"`).
 4. `pip install -r requirements.txt` (adds `python-rtmidi`).
 5. Restart the server. It logs `QUANTIZE listening for MIDI clock on '…'` when the
-   port is open, and `BED -> n` on every quantised switch.
+   port is open, and `CUE -> n` on every quantised switch.
 
 **Live's transport must be running** — MIDI clock only flows while it plays. In
 Arrangement, keep the loop brace on and let it run.
@@ -292,10 +302,20 @@ Arrangement, keep the loop brace on and let it run.
 
 `quantize_bars: 8` on a 16-bar loop puts the cut on bar 1 or bar 9. The cost is
 the wait: **worst case is half your loop length, average a quarter.** At 120 BPM
-8 bars is 16 s. If that feels dead in rehearsal, drop to `4` — it is a config
-change, not a code change. The `/coral/latch` riser is what covers the wait
-before a bleach; nothing covers it on the other transitions, which is the honest
-argument for 4 over 8.
+8 bars is 16 s, average 8 s. If that feels dead in rehearsal, drop to `4` — it is
+a config change, not a code change.
+
+The wait is smaller in practice than that number suggests, because only *one*
+transition is visibly held. The projection blends on `intensity` and uses the cue
+only to pick which pair it is blending between, so 0→1 and 3→0 are continuous
+either way and the cue changes nothing about them. **The only moment that waits is
+the bleach.** During it, `intensity` is pinned at 1.0, so the coral holds at full
+fluorescence — a steady held look, not a drifting one — with the `/coral/latch`
+riser sustained underneath. Then the rupture, the bed and the blackout land
+together.
+
+So the honest question for rehearsal is narrow: does that hold read as a held
+breath or as a stall? If it stalls, drop to `4`.
 
 `lead_ms` fires the switch slightly early to absorb the server tick, OSC transit
 and Live's own parameter latency. Start at `0`; if the cut feels consistently
@@ -303,7 +323,7 @@ late, try `40`.
 
 ### If it doesn't quantise
 
-The failure mode is silent by design — no clock means `/coral/bed` publishes
+The failure mode is silent by design — no clock means `/coral/cue` publishes
 immediately, which is exactly the behaviour you had before. Check the server log
 at startup:
 
@@ -316,9 +336,11 @@ at startup:
 
 This is the one place anything talks *back* to the server, which CLAUDE.md
 otherwise forbids. What crosses the boundary is a clock and never state — Live
-cannot influence *what* the server publishes, only *when* the bed value moves —
-and with no clock the system is byte-identical to before. Ableton is still never
-a dependency.
+cannot influence *what* the server publishes, only *when* the cue moves — and with
+no clock every output reverts to switching immediately, which is exactly the
+behaviour that predates this feature. Ableton now sets the timing for the whole
+room, but it is still never a dependency: closing Live degrades the piece, it
+never stops it.
 
 ---
 

@@ -140,11 +140,39 @@ Two notes from that run:
   `temperature.py` already logs once on failure and once on recovery; `actuation.py` could match. Not a bug,
   but worth doing before the logs are relied on as thesis data.
 
+---
+
+## 2026-08-13 — Host moved to Ethernet
+
+USB-C→Ethernet adapter arrived: macOS calls it `USB 10/100 LAN`, device `en13`, MAC `DC:04:5A:36:B1:22`,
+reserved as `192.168.50.10`. Host wired into a yellow LAN port on the C50. Router, plugs' subnet and internet
+all reachable over the wire.
+
+### Two traps, both worth remembering
+
+**One Ethernet cable cannot do both jobs.** The cable was running Optus → C50 WAN (the development internet
+uplink); reusing it for laptop → C50 LAN removes that uplink. The wired Mac then has *no internet*, because
+macOS ranks `USB 10/100 LAN` above Wi-Fi in the service order and makes the C50 — a router with no uplink —
+the default route. Either keep a second cable for the WAN uplink, or reorder services so Wi-Fi sits above the
+USB LAN entries (*System Settings → Network → ⋯ → Set Service Order*), which routes internet over Wi-Fi and
+`192.168.50.0/24` over the wire.
+
+**Do not leave Wi-Fi on while wired.** With Wi-Fi on `coral-5` and Ethernet on the same LAN, the Mac holds
+two addresses on one subnet with two default routes to the same gateway, and traffic to other LAN devices
+falls in the gap between them. Turn Wi-Fi off; that is the exhibition configuration anyway.
+
+The adapter's reservation follows the same rule as the plugs: adding it does not move a device that already
+holds a lease. Unplug and replug the cable to force a fresh request; if it still holds a pool address, reboot
+the router and replug.
+
 ### Next
-3. Run the Phase 4 acceptance test (`plugs.enabled: true`, `temperature.mode: simulated`, server +
-   `fake_rig.py`) — the plugs should physically switch on target changes.
-4. Guest network off; change the admin password off `admin`/`admin`.
-5. Phase 5: ESPHome sensor — credentials into `esphome/secrets.yaml`, flash, reserve `.30`.
-6. When the Ethernet adapter arrives: reserve its MAC as `.10`, turn the Mac's Wi-Fi **off**, repoint the
-   display page and any AR client from `.11` to `.10`, and retest wired with the AR phones on `coral-5`.
-7. Write the printed config sheet: SSIDs, Wi-Fi password, admin password, reservation table.
+
+1. Bind the `.10` reservation (unplug/replug the cable).
+2. Guest network off; change the admin password off `admin`/`admin`.
+3. Re-run the full arc wired, with the plugs in and AR phones on `coral-5`. A Phase 4 pass over Wi-Fi is not
+   a pass for the exhibition network configuration.
+4. Phase 5: ESPHome sensor — credentials into `esphome/secrets.yaml`, flash, reserve `.30`, then
+   `temperature.mode: real`.
+5. Repoint the display page and any AR client at `192.168.50.10`.
+6. Write the printed config sheet: SSIDs, Wi-Fi password, admin password, reservation table.
+7. Optional cleanup: quieten repeated actuation-failure logging in `actuation.py`.

@@ -106,10 +106,25 @@ Power the ESP32 from a USB brick (not the smart plugs — the sensor must stay p
 
 ## ESPHome firmware
 
-Config lives at `esphome/coral-temp-sensor.yaml`. Install ESPHome (`pip install esphome`), edit the WiFi credentials, then:
+Config lives at `esphome/coral-temp-sensor.yaml`.
+
+ESPHome gets **its own virtualenv**, kept out of the project's. It pulls in platformio, esptool and a
+compiler toolchain, with pins on `pyyaml`/`requests` that the server also depends on — a build tool has no
+business being able to break the runtime. Like every venv here it lives outside iCloud (see the note under
+Known constraints):
 
 ```bash
-esphome run esphome/coral-temp-sensor.yaml
+python3 -m venv ~/.venvs/esphome
+~/.venvs/esphome/bin/pip install esphome
+```
+
+ESPHome requires Python ≥3.12 (and, as of 2026.7, <3.15).
+
+Then copy `esphome/secrets.example.yaml` to `esphome/secrets.yaml` (gitignored) and fill in the `coral-24`
+credentials. Flash with the board on USB — a **data** cable, not a charge-only one:
+
+```bash
+~/.venvs/esphome/bin/esphome run esphome/coral-temp-sensor.yaml
 ```
 
 First flash is over USB; subsequent updates are over-the-air. Once running, verify:
@@ -117,6 +132,19 @@ First flash is over USB; subsequent updates are over-the-air. Once running, veri
 ```bash
 curl http://<sensor-ip>/sensor/water_temperature
 ```
+
+The REST path is built from the sensor's **`name:`**, not its `id:` — so renaming the entity moves the
+endpoint, and a space in the name becomes `%20` in the URL. This is why the name is the URL-safe
+`water_temperature` rather than a prettier "Water Temperature". Whatever the path is, it must match
+`temperature.real.sensor_url` in `config.yaml`. To list what the device actually serves:
+
+```bash
+curl -s -m 6 -N http://<sensor-ip>/events | head -c 1500
+```
+
+With no probe attached the reply is `{"value":null,"state":"NA"}`. That is the correct result at this stage:
+`RealSource._parse` turns it into a `TypeError` and holds the last good reading, so an unplugged probe
+degrades to a frozen temperature rather than garbage entering the state machine.
 
 ---
 

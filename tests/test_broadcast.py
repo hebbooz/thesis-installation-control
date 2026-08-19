@@ -30,14 +30,14 @@ def _unpack(data: bytes) -> dict:
 
 
 def test_bundle_addresses_and_types():
-    """/coral/state and /coral/bed are int32; the rest are float32."""
-    data = _build_bundle(state=2, intensity=0.5, temp=27.3, bed=1, latch=0.25)
+    """/coral/state and /coral/cue are int32; the rest are float32."""
+    data = _build_bundle(state=2, intensity=0.5, temp=27.3, cue=1, latch=0.25)
     msgs = _unpack(data)
 
     assert set(msgs) == {"/coral/state", "/coral/intensity", "/coral/temp",
-                         "/coral/bed", "/coral/latch"}
+                         "/coral/cue", "/coral/latch"}
     assert msgs["/coral/state"] == 2 and isinstance(msgs["/coral/state"], int)
-    assert msgs["/coral/bed"] == 1 and isinstance(msgs["/coral/bed"], int)
+    assert msgs["/coral/cue"] == 1 and isinstance(msgs["/coral/cue"], int)
     assert isinstance(msgs["/coral/intensity"], float)
     assert msgs["/coral/intensity"] == 0.5
     assert isinstance(msgs["/coral/temp"], float)
@@ -47,9 +47,9 @@ def test_bundle_addresses_and_types():
     assert abs(msgs["/coral/temp"] - 27.3) < 1e-4
 
 
-def test_bed_defaults_to_state():
-    """An omitted bed makes /coral/bed a copy of /coral/state, so subscribers can
+def test_cue_defaults_to_state():
+    """An omitted cue makes /coral/cue a copy of /coral/state, so subscribers can
     map it unconditionally whether or not quantisation is switched on."""
     msgs = _unpack(_build_bundle(state=3, intensity=0.4, temp=26.9))
-    assert msgs["/coral/bed"] == 3
+    assert msgs["/coral/cue"] == 3
     assert msgs["/coral/latch"] == 0.0

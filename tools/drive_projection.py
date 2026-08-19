@@ -112,11 +112,18 @@ class Sender:
         self.addr = (host, port)
 
     def send(self, state: int, intensity: float) -> None:
-        # Same three addresses, same order and types as broadcast.py emits.
+        # Same addresses, same order and types as broadcast.py emits.
+        #
+        # /coral/cue carries the same value as /coral/state here. The server holds
+        # the cue back to a bar line when Live's clock is running, but this tool
+        # exists to drive the player *without* the server, so there is no clock to
+        # quantise against — unquantised is the honest stand-in, and it matches
+        # what the server itself publishes whenever the clock is silent.
         for dgram in (
             _osc("/coral/state", int(state)),
             _osc("/coral/intensity", float(intensity)),
             _osc("/coral/temp", float(temp_for(intensity))),
+            _osc("/coral/cue", int(state)),
         ):
             try:
                 self.sock.sendto(dgram, self.addr)

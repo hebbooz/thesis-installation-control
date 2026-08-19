@@ -1,9 +1,16 @@
 # Projection player
 
 The Unity player that drives the spanned 2560×800 projector canvas (Phase 8).
-It is a passive subscriber: it listens on UDP 9020 for `/coral/state`,
-`/coral/intensity` and `/coral/temp`, and answers only *given this state and
-intensity, what do I show?*
+It is a passive subscriber: it listens on UDP 9020 for `/coral/cue`,
+`/coral/intensity`, `/coral/state` and `/coral/temp`, and answers only *given this
+phase and intensity, what do I show?*
+
+**It switches on `cue`, not `state`.** The two carry the same phase; `cue` is held
+back to a musical bar line when the server has Ableton's clock, so the clip swap
+lands on the same downbeat as the audio bed and the lamp blackout instead of
+scattering across whichever broadcast carried the transition (PROTOCOL.md §1).
+`Cue` falls back to `State` until a `/coral/cue` actually arrives, so an older
+server degrades to immediate switching rather than freezing the wall at state 0.
 
 The Unity project itself is not version-controlled here (it is mostly generated
 files). What is committed is the bespoke code — drop `Scripts/` into a new
@@ -171,7 +178,8 @@ refusing to start — an exhibition machine must always come up.
 | `video_dir` | Absolute path to the clips; `""` resolves them beside the config file |
 | `crossfade_s` | One fade rate for everything. Also the slew limit on the state 0/1 blend, and the lead-in used to hand a one-shot over before its last frame |
 | `video_width/height` | Native size of the exported clips. Stated, not detected — RenderTextures are built before any clip is prepared. A prepared clip that disagrees logs a warning |
-| `display_width/height` | 2560 × 800 spanned canvas |
+| `display_width/height` | 2560 × 800 — the **whole** canvas across both projectors, not one window |
+| `displays` | Unity display indices left to right, one per projector — see *Canvas* |
 | `fit`, `pan_x/y` | How a source of a different aspect maps onto the canvas — see *Canvas arithmetic* |
 
 ## Design decisions
@@ -217,10 +225,19 @@ render and keep in sync.
 ### 4. The bleach latch keeps a short one-shot
 
 The single exception, because intensity is already ~0.9 when the latch fires and
-there is nothing left for it to drive. It is safe from interruption **by
-construction**: state 2 cannot be shorter than `recovery_lag_s` (30 s — the
-visitor cannot press cool before the latch, since latching only arms while
-warming), so a 20 s clip settles on the bleached loop with ~10 s to spare.
+there is nothing left for it to drive. The state itself gives it room: state 2
+cannot be shorter than `recovery_lag_s` (30 s — the visitor cannot press cool
+before the latch, since latching only arms while warming), so a 20 s clip settles
+on the bleached loop with ~10 s to spare.
+
+That is no longer sufficient on its own, because the player switches on the
+quantised `cue`. Quantising moves *both* edges of state 2 onto the bar grid, and
+the grid can compress the cue's view of a 30 s state below the clip's own length:
+at `quantize_bars: 8` (16 s at 120 BPM) a latch firing in the last ~2 s before a
+bar line puts `cue 1->2` and `cue 2->3` exactly one 16 s window apart, against a
+20 s clip. `OnCueChanged` therefore refuses to abandon the one-shot mid-play and
+lets `LatchNearEnd` retire it as usual — states 2 and 3 share a blend rule, so the
+only consequence is that the heal picks up a few seconds into its ramp.
 
 That bound is the whole reason for the length:
 
@@ -250,13 +267,59 @@ Not cosmetic. A gamma-space dissolve between the bright healthy look and the
 stopped-down bleached look yields a midpoint darker than the true half-exposure,
 and the ~64 s state 0/1 fade visibly sags through the midtones.
 
-## Canvas
+## Canvas — how one image covers two projectors
 
-Two 1280×800 projectors side by side make a **2560×800** desktop — each shows
+**macOS never joins two displays into one desktop.** Extend mode gives two
+separate desktops, and a fullscreen window always lands on exactly one of them.
+There is no "span" setting to switch on; the phrase "spanned canvas" elsewhere in
+these docs describes the *image*, not anything the OS provides.
+
+So the player does the spanning itself:
+
+1. It composites the whole canvas — `display_width × display_height`, the full
+   image across both projectors — once per frame into one RenderTexture
+   (`ProjectionPlayer.LateUpdate`).
+2. One `CoralOutput` camera per projector blits **its own horizontal slice** of
+   that canvas to its own display (`CoralOutput.cs`).
+
+Every output reads the same canvas in the same frame, so the halves cannot drift.
+That is the reason not to run two copies of the player, one per projector: two
+processes decode independently and the caustics slide out of phase across the
+seam within minutes.
+
+`displays` in the config lists Unity display indices **left to right**:
+
+```json
+"displays": [0, 1]
+```
+
+- **Index 0 is always whichever screen macOS calls the Main Display.** With the
+  laptop as main, `[0, 1]` puts the left half on the laptop. Either drag the menu
+  bar onto the left projector in *System Settings → Displays*, or set
+  `"displays": [1, 2]`.
+- The player logs every attached display and its size at startup — read
+  `Player.log` and match the indices to what is physically left and right.
+- Set *Displays* to **Extend**, not Mirror, and arrange the two projectors side
+  by side with their tops level.
+- An index that is not attached is skipped with a warning. If none are left the
+  player falls back to a **single output showing the whole canvas**, which is the
+  windowed bench setup — so testing on the laptop alone needs no config change.
+
+### Pixel mapping
+
+Two 1280×800 projectors side by side make a **2560×800** canvas — each shows
 exactly half. Clips are exported at **2560×800**, so every source pixel maps to
 one projector pixel with no scaling anywhere in the chain.
 
-`fit` is therefore a no-op (scale 1,1 offset 0,0) and `pan_x/y` are irrelevant.
+⚠️ **This only holds if each display is actually running at 1280×800.** If macOS
+has the projectors at 1920×1080 (they will accept and internally downscale a 1080p
+signal, so it looks plausible), the canvas is really 3840×1080 and a 2560×800 clip
+is being upscaled. Check *System Settings → Displays* per projector and either
+force the native mode, or set `display_width/height` to the real total and
+re-export the clips to match.
+
+`fit` is a no-op when source and canvas agree (scale 1,1 offset 0,0) and
+`pan_x/y` are irrelevant.
 Both stay as a safety net: a clip exported at the wrong size gets cropped to fill
 rather than silently squashed. Rely on the startup warning rather than the
 fallback — the player logs `[clip] … but config says …` when a prepared clip
@@ -269,7 +332,7 @@ disagrees with `video_width/height`.
 | `coral-healthy` | 60 s | Loops forever; length is a quality choice, not a functional one |
 | `coral-fluorescent` | 60 s | ” |
 | `coral-bleached` | 60 s | ” |
-| `coral-fluorescent-to-bleached` | **20 s** | Must be < state 2's 30 s floor so it can never be cut short |
+| `coral-fluorescent-to-bleached` | **20 s** | Sized against state 2's 30 s floor. Quantisation can narrow the *cue's* view of that floor to one bar window, so `OnCueChanged` also refuses to cut it short (§4) |
 
 The three loops don't affect behaviour at any length — they are the safety net
 that covers indefinite dwell. 60 s balances the two things that do matter:
@@ -362,6 +425,11 @@ Transitions are logged with timestamps to Unity's `Player.log`
 | Crop keeps the wrong half of the frame | Adjust `pan_y`; flip its sign if it moves the wrong way |
 | State appears to flicker | `src/server.py` and `drive_projection.py` both sending to 9020 |
 | One layer black, others fine | Check `[clip]` errors in `Player.log` — bad path. Other layers keep working by design. |
+| Whole image squeezed onto one projector, other one blank | Only one entry resolved in `displays` — check the display list logged at startup |
+| Left half on the laptop, right half on a projector | Display 0 is the laptop; make a projector the Main Display or set `"displays": [1, 2]` |
+| Halves swapped | `displays` is listed right-to-left, or the projectors are arranged the other way in *System Settings → Displays* |
+| Both projectors show the same half | *Displays* is set to Mirror, not Extend |
+| Image soft, or scaled oddly across both | Projectors running 1920×1080 while the canvas is 2560×800 — see *Pixel mapping* |
 | Nothing arrives on 9020 | Another process holds the port, or `osc_port` disagrees with `config.yaml` |
 | Video stutters | Re-encode to ProRes; check the Mac isn't also rendering in Unreal |
 

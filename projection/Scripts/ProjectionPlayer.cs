@@ -4,11 +4,17 @@
 ///
 /// THREE LOOPS AND ONE RUPTURE
 /// ---------------------------
-/// There are no directional transition clips. The state selects a PAIR of looping
+/// There are no directional transition clips. The CUE selects a PAIR of looping
 /// clips and intensity sets the weight within that pair:
 ///
-///     states 0,1   healthy <-> fluorescent    w_fluorescent = intensity
-///     states 2,3   healthy <-> bleached       w_bleached    = intensity
+///     cue 0,1   healthy <-> fluorescent    w_fluorescent = intensity
+///     cue 2,3   healthy <-> bleached       w_bleached    = intensity
+///
+/// The cue, not the state: it is the same phase held back to a musical bar line
+/// (PROTOCOL.md §1), so this swap lands on the same downbeat as the audio bed and
+/// the lamp blackout rather than scattering across whichever broadcast carried the
+/// transition. Intensity stays immediate, which is why only one moment visibly
+/// waits — see BAR-QUANTISED SWITCHING below.
 ///
 /// States 2 and 3 collapse into one rule because the server pins intensity to 1.0
 /// while bleached and ramps it 1.0 -> 0.0 across recovery_ramp_s. So the heal is
@@ -17,18 +23,32 @@
 /// travelling back toward bleached.
 ///
 /// The single exception is the bleach latch. Intensity is already ~0.9 when it
-/// fires, so there is no intensity movement to carry it — the state change has to.
-/// A short one-shot plays once on 1->2. It is safe from interruption by
-/// construction: state 2 cannot be shorter than recovery_lag_s (30 s, since the
-/// visitor cannot press cool before the latch, which only arms while warming), so
-/// the 20 s clip settles on the bleached loop with ~10 s to spare.
+/// fires, so there is no intensity movement to carry it — the cue change has to.
+/// A short one-shot plays once on 1->2.
 ///
 ///     crossfade_s  <  latch clip  <  recovery_lag_s
 ///        1.5 s     <     20 s     <       30 s
 ///
 /// Those two config values are coupled with only 10 s of slack. Lowering
-/// recovery_lag_s below ~25 s cuts the bleach off part-way, and it snaps to fully
-/// white before healing — the exact failure the rest of this design removes.
+/// recovery_lag_s below ~25 s would cut the bleach off part-way, snapping to fully
+/// white before healing — the exact failure the rest of this design removes. The
+/// clip is now defended against that directly in OnCueChanged rather than resting
+/// on the config staying in range, because quantisation can compress the gap on
+/// its own (see below).
+///
+/// BAR-QUANTISED SWITCHING
+/// -----------------------
+/// Because the pair is chosen by cue but the weight is driven by intensity, most
+/// of the arc is unaffected by quantisation: 0->1 and 3->0 are continuous blends
+/// that look identical whether the cue is held or not. THE ONLY MOMENT THAT WAITS
+/// IS THE BLEACH. During that wait intensity is pinned at 1.0, so the coral holds
+/// at full fluorescence — steady, not drifting — until the rupture lands on the bar.
+///
+/// The one hazard is at the other end of state 2. Quantising moves both of its
+/// edges onto the bar grid, and the grid can compress the cue's view of a 30 s
+/// state below the 20 s clip: at quantize_bars 8 (16 s at 120 BPM) a latch firing
+/// in the last ~2 s before a bar line puts cue 1->2 and cue 2->3 exactly one 16 s
+/// window apart. OnCueChanged therefore refuses to abandon the one-shot mid-play.
 ///
 /// THE FORWARD-ONLY INVARIANT
 /// --------------------------
@@ -47,6 +67,7 @@
 /// midtones; a linear one does not.
 /// </summary>
 using System;
+using System.Collections.Generic;
 using UnityEngine;
 using UnityEngine.Video;
 
@@ -73,6 +94,13 @@ namespace Coral
         CoralOscListener _osc;
         Material _blend;
 
+        /// <summary>
+        /// The whole spanned image, composited once per frame. Each CoralOutput blits
+        /// its own slice of this to its own projector, so the halves cannot drift.
+        /// </summary>
+        public RenderTexture Canvas => _canvas;
+        RenderTexture _canvas;
+
         readonly VideoPlayer[] _players = new VideoPlayer[LayerCount];
         readonly RenderTexture[] _targets = new RenderTexture[LayerCount];
         readonly float[] _weight = new float[LayerCount];
@@ -91,7 +119,7 @@ namespace Coral
         const float LatchSettleS = 0.5f;
 
         Mode _mode = Mode.Continuous;
-        int _lastState = 0;
+        int _lastCue = 0;
 
         void Awake()
         {
@@ -101,11 +129,20 @@ namespace Coral
             // Ableton) and must keep rendering; the machine must never sleep.
             Application.runInBackground = true;
             Screen.sleepTimeout = SleepTimeout.NeverSleep;
-            Screen.SetResolution(_cfg.display_width, _cfg.display_height, _cfg.fullscreen);
 
+            // This camera hosts the player; it no longer draws. The per-projector
+            // CoralOutput cameras do, each onto its own display.
             var cam = GetComponent<Camera>();
             cam.clearFlags = CameraClearFlags.SolidColor;
             cam.backgroundColor = Color.black;
+            cam.enabled = false;
+
+            // sRGB to match the layer targets, so the slice blit stays in the same
+            // colour space the shader wrote in.
+            _canvas = new RenderTexture(_cfg.display_width, _cfg.display_height, 0,
+                                        RenderTextureFormat.ARGB32, RenderTextureReadWrite.sRGB);
+            _canvas.Create();
+            ClearCanvas();
 
             var shader = blendShader != null ? blendShader : Shader.Find("Coral/Blend2");
             if (shader == null) Debug.LogError("[blend] CoralBlend.shader not found — assign it on the ProjectionPlayer component");
@@ -118,10 +155,72 @@ namespace Coral
             _osc = gameObject.AddComponent<CoralOscListener>();
             _osc.Begin(_cfg.osc_port);
 
+            CreateOutputs();
+
             CreateLayer(Layer.Healthy, _cfg.clips.healthy, loop: true);
             CreateLayer(Layer.Fluorescent, _cfg.clips.fluorescent, loop: true);
             CreateLayer(Layer.Bleached, _cfg.clips.bleached, loop: true);
             CreateLayer(Layer.Latch, _cfg.clips.latch, loop: false);
+        }
+
+        /// <summary>
+        /// One output camera per projector, left to right. macOS cannot present one
+        /// window across two displays, so the canvas is sliced here instead of being
+        /// stretched over a desktop that does not exist.
+        ///
+        /// Fail-soft, because an exhibition machine must always come up: an index
+        /// that is not attached is dropped, and if that leaves nothing the player
+        /// falls back to a single output showing the whole canvas — which is exactly
+        /// the windowed bench setup drive_projection.py is used against.
+        /// </summary>
+        void CreateOutputs()
+        {
+            Log($"{Display.displays.Length} display(s) attached:");
+            for (int i = 0; i < Display.displays.Length; i++)
+                Log($"  display {i}: {Display.displays[i].systemWidth}x{Display.displays[i].systemHeight}" +
+                    (i == 0 ? "  (macOS Main Display)" : ""));
+
+            var wanted = _cfg.displays != null && _cfg.displays.Length > 0 ? _cfg.displays : new[] { 0 };
+            var use = new List<int>();
+            foreach (int idx in wanted)
+            {
+                if (idx < 0 || idx >= Display.displays.Length)
+                {
+                    Debug.LogWarning($"[display] index {idx} is not attached — skipping it. " +
+                                     "Check the display list above against \"displays\" in coral-projection.json.");
+                    continue;
+                }
+                if (!use.Contains(idx)) use.Add(idx);
+            }
+            if (use.Count == 0) use.Add(0);
+
+            int n = use.Count;
+            int sliceW = Mathf.Max(_cfg.display_width / n, 1);
+
+            // Sizes the MAIN window only (display 0). Activate() gives every other
+            // display its own native fullscreen surface.
+            Screen.SetResolution(sliceW, _cfg.display_height, _cfg.fullscreen);
+
+            for (int i = 0; i < n; i++)
+            {
+                int idx = use[i];
+                if (idx != 0) Display.displays[idx].Activate();
+
+                var host = new GameObject($"Output_{idx}");
+                host.transform.SetParent(transform, false);
+
+                var c = host.AddComponent<Camera>();
+                c.clearFlags = CameraClearFlags.SolidColor;
+                c.backgroundColor = Color.black;
+                c.cullingMask = 0;            // draws nothing; it only carries the blit
+                c.targetDisplay = idx;
+                c.depth = i;
+
+                host.AddComponent<CoralOutput>().Bind(this, i, n);
+            }
+
+            Log($"outputs: {n} x {sliceW}x{_cfg.display_height} on display(s) [{string.Join(", ", use)}]" +
+                (n == 1 ? " — single output, showing the whole canvas" : ""));
         }
 
         void CreateLayer(Layer layer, string clip, bool loop)
@@ -174,11 +273,13 @@ namespace Coral
             StartPreparedLoops();
             TryFirePending();
 
-            int state = _osc.State;
-            if (state != _lastState)
+            // Cue, not State: the bar-quantised twin, so this swap lands on the same
+            // downbeat as the audio bed and the lamp. Intensity below stays immediate.
+            int cue = _osc.Cue;
+            if (cue != _lastCue)
             {
-                OnStateChanged(_lastState, state);
-                _lastState = state;
+                OnCueChanged(_lastCue, cue);
+                _lastCue = cue;
             }
 
             ChooseTargets(_osc.Intensity);
@@ -205,9 +306,29 @@ namespace Coral
             }
         }
 
-        void OnStateChanged(int from, int to)
+        void OnCueChanged(int from, int to)
         {
-            Log($"state {from} -> {to}");
+            Log($"cue {from} -> {to}");
+
+            // Never abandon the rupture part-way. Quantisation moves both ends of
+            // state 2 onto the bar grid, and the grid can compress the cue's view of
+            // it below the clip's own length: at quantize_bars 8 (16 s at 120 BPM) a
+            // latch firing in the last ~2 s before a bar line puts cue 1->2 and
+            // cue 2->3 exactly one window — 16 s — apart, against a 20 s clip. The
+            // state itself still holds 2 for the full recovery_lag_s; only the
+            // quantised view of it is short.
+            //
+            // Letting it finish costs nothing: state 3 and state 2 share Mode.Latched,
+            // so the only difference is that the heal picks up a few seconds into its
+            // ramp. Cutting to a hard white snap is the failure this whole design
+            // exists to remove, so the clip wins and ChooseTargets retires it via
+            // LatchNearEnd as usual.
+            if (_mode == Mode.LatchOneShot && to >= 2)
+            {
+                Log("cue moved during the rupture — letting the one-shot finish");
+                return;
+            }
+
             switch (to)
             {
                 case 0:
@@ -353,10 +474,14 @@ namespace Coral
         /// to 1 even mid-ease. At most two are ever meaningfully non-zero, so this
         /// is the "dual VideoPlayer cross-fade" of §6.5 — the others keep decoding
         /// but contribute nothing.
+        ///
+        /// Runs ONCE per frame into the shared canvas, in LateUpdate rather than in a
+        /// camera callback: every projector then blits a slice of the same finished
+        /// image, with no dependence on which output camera happens to render first.
         /// </summary>
-        void OnRenderImage(RenderTexture src, RenderTexture dst)
+        void LateUpdate()
         {
-            if (_blend == null) { Graphics.Blit(src, dst); return; }
+            if (_canvas == null || _blend == null) return;
 
             int a = -1, b = -1;
             for (int i = 0; i < LayerCount; i++)
@@ -369,9 +494,8 @@ namespace Coral
             if (a < 0)
             {
                 // Nothing up yet: the first crossfade_s from cold (which reads as a
-                // house-lights fade-in), or every clip dead. The camera already
-                // cleared to black, so passing it through is the whole job.
-                Graphics.Blit(src, dst);
+                // house-lights fade-in), or every clip dead. Black is the whole job.
+                ClearCanvas();
                 return;
             }
 
@@ -382,7 +506,19 @@ namespace Coral
             _blend.SetTexture("_TexA", _targets[a]);
             _blend.SetTexture("_TexB", b >= 0 ? _targets[b] : _targets[a]);
             _blend.SetFloat("_Blend", sum > 0f ? wb / sum : 0f);
-            Graphics.Blit(src, dst, _blend);
+
+            // The shader ignores _MainTex; the source is passed only because Blit
+            // requires one.
+            Graphics.Blit(_targets[a], _canvas, _blend);
+        }
+
+        void ClearCanvas()
+        {
+            if (_canvas == null) return;
+            var prev = RenderTexture.active;
+            RenderTexture.active = _canvas;
+            GL.Clear(true, true, Color.black);
+            RenderTexture.active = prev;
         }
 
         /// <summary>
@@ -430,6 +566,7 @@ namespace Coral
         {
             for (int i = 0; i < LayerCount; i++)
                 if (_targets[i] != null) _targets[i].Release();
+            if (_canvas != null) _canvas.Release();
         }
     }
 }

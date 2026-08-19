@@ -37,26 +37,38 @@ captive_portal:
 #   broker: 192.168.50.10
 #   topic_prefix: coral
 
-dallas:
-  - pin: GPIO4
-    update_interval: 500ms
+# 1-Wire bus. The old single `dallas:` component was replaced by a `one_wire`
+# bus plus a `dallas_temp` sensor platform; update_interval and address now
+# live on the sensor, not on the bus.
+one_wire:
+  - platform: gpio
+    pin: GPIO4
 
 sensor:
-  - platform: dallas
+  - platform: dallas_temp
     # Run once with this commented out; the log prints the probe's address.
     # Then set it here so the sensor is identified explicitly.
     # address: 0x1234567890abcdef
     index: 0
     id: water_temperature
-    name: "Water Temperature"
+    # The web server's REST path is built from this *name*, not from `id`, so a
+    # space here becomes %20 in the URL the orchestration server polls. Keeping
+    # the name URL-safe keeps `temperature.real.sensor_url` free of escaping.
+    name: "water_temperature"
+    # 12-bit is 0.0625 °C steps, but its conversion takes up to 750 ms, so the
+    # interval cannot be faster than that. 1 s is ample: the water's thermal
+    # mass takes 60–90 s to cross the 2 °C the whole state machine spans.
+    update_interval: 1s
+    resolution: 12
     unit_of_measurement: "°C"
     accuracy_decimals: 2
     filters:
       # Light smoothing — the state machine wants a stable reading,
-      # not raw sensor jitter.
+      # not raw sensor jitter. Sliding median: a value every second,
+      # ~2 s of lag, one bad sample outvoted.
       - median:
-          window_size: 5
-          send_every: 2
+          window_size: 3
+          send_every: 1
 
   - platform: wifi_signal
     name: "WiFi Signal"

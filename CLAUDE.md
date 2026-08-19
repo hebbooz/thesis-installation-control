@@ -15,7 +15,7 @@ Research context: the piece addresses "psychic numbing" around climate crisis by
 ## Non-negotiable design principles
 
 1. **KISS / off-the-shelf.** The orchestration server is the ONLY bespoke component. Everything else is a purchased product, ready-made firmware (Tasmota/ESPHome/WLED), or a reused existing asset. Do not propose building custom electronics, and do not add frameworks (no message brokers, no state-machine libraries, no container orchestration, no Home Assistant dependency). This system is simpler than any framework's overhead.
-2. **Loose coupling.** Outputs never talk to each other and never talk back to the server (except AR clients sending `hello`). They hold no state beyond the last broadcast received.
+2. **Loose coupling.** Outputs never talk to each other and never talk back to the server (except AR clients sending `hello`). They hold no state beyond the last broadcast received. One contained exception: Ableton sends MIDI clock *in*, which the server uses to decide **when** the switching cue moves — never **what** it is. With no clock the cue is identical to `state` and everything switches immediately, so Live is never a dependency (`src/quantize.py`, `docs/ABLETON.md`).
 3. **Startup-order independence.** Any component may start, crash, or restart at any time and must reconverge within one broadcast interval with no operator action. Test by starting clients before the server.
 4. **Local-only.** No dependency on the public internet at runtime. All control traffic stays on a private LAN.
 5. **Config, not code.** Every threshold, timing, IP, and port lives in one config file. Never hard-code an address or a magic number.
@@ -77,10 +77,22 @@ The bleach latch and the recovery lag are deliberate and thematic — the cool b
 
 ## Protocol summary
 
-Server → all subscribers, 5 Hz:
-- `/coral/state` int32 0–3
-- `/coral/intensity` float32 0.0–1.0
+Server → all subscribers, 5 Hz, as one bundle:
+- `/coral/cue` int32 0–3 — the phase, bar-quantised. **Everything that switches uses this**
+- `/coral/intensity` float32 0.0–1.0 — continuous driver
+- `/coral/latch` float32 0.0–1.0 — progress toward the bleach; the one forward-looking value
+- `/coral/state` int32 0–3 — the phase, immediate and unquantised. Truth, not presentation
 - `/coral/temp` float32 °C
+
+**Use `cue` to switch, `state` to know.** The audio bed, the lamp blackout, the
+projection's clip pair and the AR appearance all key off `cue`, from the same
+datagram, so they change on one downbeat rather than scattering across whichever
+broadcast carried the transition. Actuation, logging and diagnostics use `state`.
+
+Not quantised, and don't make them so: `intensity` and `latch` (continuous, and
+`latch` exists to *precede* the bleach), and the heater/fan (they follow `target`,
+upstream of the water temperature — delaying them cannot align anything downstream,
+it only makes the button feel dead).
 
 AR clients → server every 5 s: `/client/hello` (string id). Registry prunes after 15 s silence.
 

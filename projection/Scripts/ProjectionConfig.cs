@@ -47,10 +47,20 @@ namespace Coral
         public int video_width = 2560;
         public int video_height = 800;
 
-        // The spanned desktop: two 1280x800 projectors side by side.
+        // The whole spanned canvas, across every projector. Not the size of one
+        // window: the player composites at this size and each output takes its own
+        // horizontal slice of it.
         public int display_width = 2560;
         public int display_height = 800;
         public bool fullscreen = true;
+
+        // Unity display indices, LEFT TO RIGHT, one per projector. Index 0 is always
+        // whichever screen macOS calls the Main Display, so make the left projector
+        // main (System Settings > Displays, drag the menu bar onto it) or list the
+        // indices the player logs at startup. An index that is not attached is
+        // skipped with a warning, so a laptop-only bench run falls back to a single
+        // output showing the whole canvas.
+        public int[] displays = { 0, 1 };
 
         // How a source frame whose aspect differs from the canvas is mapped:
         //   "cover"   fill the canvas, cropping the overflow (no distortion)

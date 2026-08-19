@@ -18,9 +18,26 @@ namespace Coral
 {
     public class CoralOscListener : MonoBehaviour
     {
+        /// <summary>Immediate, unquantised phase. Truth — use it to *know*.</summary>
         public int State { get; private set; }
+
+        /// <summary>
+        /// The phase to *switch* on: State held back to a musical bar line when the
+        /// server has Live's clock (PROTOCOL.md §1). Every output that changes
+        /// discretely reads this, so the clip swap lands on the same downbeat as the
+        /// audio bed, the lamp blackout and the AR appearance.
+        ///
+        /// Falls back to State until a /coral/cue actually arrives, so a server that
+        /// predates the address degrades to immediate switching rather than freezing
+        /// the projection at state 0.
+        /// </summary>
+        public int Cue => _cueReceived ? _cue : State;
+
         public float Intensity { get; private set; }
         public float Temp { get; private set; }
+
+        int _cue;
+        bool _cueReceived;
 
         /// <summary>True once any broadcast has arrived. Used only for logging.</summary>
         public bool EverReceived { get; private set; }
@@ -38,6 +55,7 @@ namespace Coral
                 _receiver = gameObject.AddComponent<OSCReceiver>();
                 _receiver.LocalPort = port;
                 _receiver.Bind("/coral/state", OnState);
+                _receiver.Bind("/coral/cue", OnCue);
                 _receiver.Bind("/coral/intensity", OnIntensity);
                 _receiver.Bind("/coral/temp", OnTemp);
                 _receiver.Connect();
@@ -55,6 +73,14 @@ namespace Coral
         {
             if (!TryReadFloat(m, out float v)) return;
             State = Mathf.Clamp(Mathf.RoundToInt(v), 0, 3);
+            Mark();
+        }
+
+        void OnCue(OSCMessage m)
+        {
+            if (!TryReadFloat(m, out float v)) return;
+            _cue = Mathf.Clamp(Mathf.RoundToInt(v), 0, 3);
+            _cueReceived = true;
             Mark();
         }
 
